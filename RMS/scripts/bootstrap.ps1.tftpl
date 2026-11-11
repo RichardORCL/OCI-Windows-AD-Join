@@ -27,8 +27,8 @@ Write-BootstrapFile 'read_secret.py' '${helper_base64}'
 Write-BootstrapFile 'cleanup_access.py' '${cleanup_base64}'
 Write-BootstrapFile 'stage_logging.ps1' '${logging_base64}'
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $root + '\join-domain.ps1"')
-$firstRun = (Get-Date).AddMinutes(5)
-$timer = New-ScheduledTaskTrigger -Once -At $firstRun -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)
+$firstRun = (Get-Date).AddSeconds(30)
+$timer = New-ScheduledTaskTrigger -Once -At $firstRun -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 1)
 $startup = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
@@ -42,4 +42,6 @@ $bootstrapWatch.Stop()
     started_utc = $bootstrapStartedUtc
     duration_ms = [Math]::Round($bootstrapWatch.Elapsed.TotalMilliseconds, 3)
     first_run_utc = $firstRun.ToUniversalTime().ToString('o')
+    initial_delay_seconds = 30
+    retry_interval_seconds = 60
 } | ConvertTo-Json -Compress | Add-Content (Join-Path $root 'timings.jsonl') -Encoding UTF8

@@ -103,7 +103,79 @@ exit `$LASTEXITCODE
     foreach ($name in @('worker.log', 'timings.jsonl', 'status.json')) {
         Assert-True (-not (Get-Content (Join-Path $workerRoot $name) -Raw).Contains('FAKE_SENSITIVE_VALUE')) 'The real worker must not log config or exception contents'
     }
-    Write-Output 'PowerShell timing tests passed: syntax, elapsed time, failure redaction, run correlation and early-exit cleanup.'
+    # Readiness polling must not proceed during service startup/running states,
+    # must resume immediately when stopped, and must yield after a bounded wait.
+    $workerTokens = $null
+    $workerErrors = $null
+    $workerAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'join-domain.ps1'), [ref]$workerTokens, [ref]$workerErrors)
+    $waitFunction = $workerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-CloudbaseInit' }, $true)
+    . ([scriptblock]::Create($waitFunction.Extent.Text))
+    $script:pollCount = 0
+    $script:serviceMode = 'becomes-ready'
+    function Get-Service($Name, $ErrorAction) {
+        $script:pollCount++
+        if ($script:serviceMode -eq 'missing') { return }
+        $state = 'Running'
+        if ($script:serviceMode -eq 'becomes-ready') {
+            if ($script:pollCount -eq 1) { $state = 'StartPending' }
+            elseif ($script:pollCount -ge 3) { $state = 'Stopped' }
+        }
+        [pscustomobject]@{ Status = $state }
+    }
+    Initialize-StageLogging -Root $testRoot
+    Set-Stage 'cloudbase-init'
+    $ready = Wait-CloudbaseInit -PollSeconds 1 -MaxWaitSeconds 5
+    Assert-True ($ready -and $script:pollCount -eq 3) 'The worker must wait through start/running states and continue as soon as stopped'
+    Complete-RunTiming
+    $readyRows = @(Get-Content (Join-Path $testRoot 'timings.jsonl') | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.run_id -eq $script:runId -and $_.event -eq 'stage_end' })
+    Assert-True ($readyRows[0].outcome -eq 'succeeded' -and $readyRows[0].duration_ms -ge 1900) 'Readiness timing must include polling sleep and resume with succeeded outcome'
+
+    $script:serviceMode = 'always-running'
+    Initialize-StageLogging -Root $testRoot
+    Set-Stage 'cloudbase-init'
+    $bounded = [Diagnostics.Stopwatch]::StartNew()
+    $ready = Wait-CloudbaseInit -PollSeconds 1 -MaxWaitSeconds 1
+    Assert-True (-not $ready -and $bounded.Elapsed.TotalSeconds -lt 3) 'An unready service must yield for the next scheduled retry without an unbounded wait'
+    Complete-RunTiming
+    $waitingStatus = Get-Content (Join-Path $testRoot 'status.json') -Raw | ConvertFrom-Json
+    Assert-True ($waitingStatus.state -eq 'waiting') 'An unready service must remain waiting'
+
+    $script:serviceMode = 'missing'
+    Initialize-StageLogging -Root $testRoot
+    Set-Stage 'cloudbase-init'
+    $missingRejected = $false
+    try { Wait-CloudbaseInit -PollSeconds 1 -MaxWaitSeconds 1 | Out-Null } catch { $missingRejected = $true }
+    Assert-True $missingRejected 'A missing service must not be mistaken for completed initialization'
+    Write-Status 'retrying' 'cloudbase-init'
+    Complete-RunTiming
+    # A one-minute trigger must preserve the six-hour window rather than expire
+    # at the old 72-attempt cap. Exercise the real worker without any OCI calls.
+    foreach ($attemptCase in @(72, 360)) {
+        '{}' | Set-Content (Join-Path $workerRoot 'config.json') -Encoding UTF8
+        @{
+            deadline = [DateTime]::UtcNow.AddHours(6).ToString('o')
+            attempts = $attemptCase
+            pending_boot = ''
+            cleanup_deadline = ''
+            tag_removed = $false
+        } | ConvertTo-Json | Set-Content (Join-Path $workerRoot 'progress.json') -Encoding UTF8
+        @"
+`$env:ProgramData = '$safeWorkerParent'
+function Get-Service(`$Name, `$ErrorAction) { return }
+function Unregister-ScheduledTask(`$TaskName, `$Confirm, `$ErrorAction) { return }
+& '$workerPath'
+exit `$LASTEXITCODE
+"@ | Set-Content $workerFixture -Encoding UTF8
+        & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -File $workerFixture
+        Assert-True ($LASTEXITCODE -eq 1) 'The retry budget fixture must fail without provisioning'
+        $budgetStatus = Get-Content (Join-Path $workerRoot 'status.json') -Raw | ConvertFrom-Json
+        if ($attemptCase -eq 72) {
+            Assert-True ($budgetStatus.state -eq 'retrying' -and $budgetStatus.stage -eq 'cloudbase-init') 'The old attempt cap must not truncate the six-hour enrollment window'
+        } else {
+            Assert-True ($budgetStatus.state -eq 'failed' -and $budgetStatus.stage -eq 'retry-window-expired') 'The new 360-attempt limit must still terminate retries'
+        }
+    }
+    Write-Output 'PowerShell timing tests passed: syntax, elapsed time, failure redaction, run correlation, early-exit cleanup and bounded service readiness polling.'
 } finally {
     Remove-Item $testRoot -Recurse -Force
 }

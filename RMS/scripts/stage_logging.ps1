@@ -71,7 +71,10 @@ function Write-Status([string]$State, [string]$Stage) {
     }
     $status | ConvertTo-Json | Set-Content $script:statusFile -Encoding UTF8
     Add-Content $script:logFile -Value "$now run_id=$script:runId state=$State stage=$Stage" -Encoding UTF8
-    if ($State -ne 'running') {
+    if ($State -eq 'running') {
+        $script:stageOutcome = 'succeeded'
+        $script:runOutcome = 'running'
+    } else {
         $script:stageOutcome = $State
         $script:runOutcome = $State
     }

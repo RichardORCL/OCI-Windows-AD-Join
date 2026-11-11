@@ -13,6 +13,27 @@ function Save-Progress {
     $script:progress | ConvertTo-Json | Set-Content $stateFile -Encoding UTF8
 }
 
+function Wait-CloudbaseInit([int]$PollSeconds = 15, [int]$MaxWaitSeconds = 45) {
+    # Poll inside this invocation; the one-minute task trigger handles later retries.
+    # Keep this wait shorter than the trigger interval so a prolonged Cloudbase run
+    # does not consume the whole 15-minute task budget before SDK installation.
+    $waitWatch = [Diagnostics.Stopwatch]::StartNew()
+    Write-TimingEvent 'cloudbase_poll_configuration' @{ stage = 'cloudbase-init'; poll_interval_seconds = $PollSeconds; max_wait_seconds = $MaxWaitSeconds }
+    do {
+        $cloudbase = @(Get-Service -Name 'cloudbase-init*' -ErrorAction Stop)
+        if ($cloudbase.Count -eq 0) { throw 'Cloudbase-Init service not found' }
+        if (@($cloudbase | Where-Object { $_.Status -ne 'Stopped' }).Count -eq 0) {
+            Write-TimingEvent 'cloudbase_ready' @{ stage = 'cloudbase-init'; wait_duration_ms = [Math]::Round($waitWatch.Elapsed.TotalMilliseconds, 3) }
+            Write-Status 'running' 'cloudbase-init'
+            return $true
+        }
+        Write-Status 'waiting' 'cloudbase-init'
+        $remaining = $MaxWaitSeconds - $waitWatch.Elapsed.TotalSeconds
+        if ($remaining -le 0) { return $false }
+        Start-Sleep -Milliseconds ([int]([Math]::Min($PollSeconds, $remaining) * 1000))
+    } while ($true)
+}
+
 function Initialize-OciSdk {
     # Reuse the runtime shipped with OCI Windows Cloudbase-Init, installing SDK
     # packages into a separate directory so its own environment is not modified.
@@ -53,7 +74,7 @@ try {
         }
         Save-Progress
     }
-    if (-not $progress.cleanup_deadline -and ([DateTime]::UtcNow -gt [DateTime]::Parse($progress.deadline).ToUniversalTime() -or $progress.attempts -ge 72)) {
+    if (-not $progress.cleanup_deadline -and ([DateTime]::UtcNow -gt [DateTime]::Parse($progress.deadline).ToUniversalTime() -or $progress.attempts -ge 360)) {
         Write-Status 'failed' 'retry-window-expired'
         Stop-JoinTask
         exit 1
@@ -68,11 +89,7 @@ try {
 
     # Never reboot while the cloud initialization service is still executing.
     Set-Stage 'cloudbase-init'
-    $cloudbase = Get-Service -Name 'cloudbase-init*' -ErrorAction SilentlyContinue
-    if (@($cloudbase | Where-Object { $_.Status -eq 'Running' }).Count -gt 0) {
-        Write-Status 'waiting' 'cloudbase-init'
-        exit 0
-    }
+    if (-not (Wait-CloudbaseInit)) { exit 0 }
 
     Set-Stage 'instance-inspection'
     $computer = Get-CimInstance Win32_ComputerSystem
@@ -80,7 +97,8 @@ try {
     if ($progress.pending_boot -eq $boot) {
         Set-Stage 'reboot-scheduling'
         Write-Status 'joined_pending_reboot' 'reboot'
-        & shutdown.exe /r /t 60 /d p:2:4 /c 'Complete OCI Active Directory join'
+        & shutdown.exe /r /t 10 /d p:2:4 /c 'Complete OCI Active Directory join'
+        if ($LASTEXITCODE -ne 0) { throw 'Reboot scheduling failed' }
         exit 0
     }
     if ($computer.PartOfDomain) {
@@ -157,7 +175,8 @@ try {
     Save-Progress
     Set-Stage 'reboot-scheduling'
     Write-Status 'joined_pending_reboot' 'reboot'
-    & shutdown.exe /r /t 60 /d p:2:4 /c 'Complete OCI Active Directory join'
+    & shutdown.exe /r /t 10 /d p:2:4 /c 'Complete OCI Active Directory join'
+    if ($LASTEXITCODE -ne 0) { throw 'Reboot scheduling failed' }
 } catch {
     Write-FailureCode $_
     # Intentionally omit exception messages, invocation details and transcripts.

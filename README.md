@@ -22,6 +22,8 @@ This step requires tenancy IAM/tag administration permissions. The group is rest
 
 The [server stack](RMS/README.md) creates the instance with the temporary tag. It creates no IAM resources. Match the IAM stack's server compartment, secret OCID and tag namespace/key/value exactly. The deployment identity needs Compute/network permissions and permission to use the tag namespace.
 
+The worker starts after 30 seconds, checks Cloudbase-Init readiness every 15 seconds while polling, retries transient failures/revocation checks every minute, and schedules the join reboot after 10 seconds. Domain-join errors stop credential submissions.
+
 The setup form includes:
 
 - Windows Server 2019, 2022 or 2025 and an x86 Standard Flex shape selector.
