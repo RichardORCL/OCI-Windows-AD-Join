@@ -28,11 +28,15 @@ locals {
     ou_path       = var.ad_ou_path
     secret_id     = var.ad_credentials_secret_ocid
     region        = var.region
+    tag_namespace = var.bootstrap_tag_namespace
+    tag_key       = var.bootstrap_tag_key
+    tag_value     = var.bootstrap_tag_value
   }
   user_data = templatefile("${path.module}/scripts/bootstrap.ps1.tftpl", {
-    config_base64 = base64encode(jsonencode(local.bootstrap_config))
-    worker_base64 = filebase64("${path.module}/scripts/join-domain.ps1")
-    helper_base64 = filebase64("${path.module}/scripts/read_secret.py")
+    config_base64  = base64encode(jsonencode(local.bootstrap_config))
+    worker_base64  = filebase64("${path.module}/scripts/join-domain.ps1")
+    helper_base64  = filebase64("${path.module}/scripts/read_secret.py")
+    cleanup_base64 = filebase64("${path.module}/scripts/cleanup_access.py")
   })
 }
 
@@ -41,6 +45,7 @@ resource "oci_core_instance" "windows" {
   availability_domain = var.availability_domain
   display_name        = var.instance_name
   shape               = var.shape
+  defined_tags        = { "${var.bootstrap_tag_namespace}.${var.bootstrap_tag_key}" = var.bootstrap_tag_value }
   shape_config {
     ocpus         = var.ocpus
     memory_in_gbs = var.memory_in_gbs
@@ -62,6 +67,9 @@ resource "oci_core_instance" "windows" {
     are_legacy_imds_endpoints_disabled = true
   }
   lifecycle {
+    # The guest removes the bootstrap tag. Never reapply it during later plans.
+    ignore_changes = [defined_tags]
+
     precondition {
       condition     = length(local.nsg_ids) <= 5 && alltrue([for id in local.nsg_ids : can(regex("^ocid1\\.networksecuritygroup\\.[A-Za-z0-9._-]+$", id))])
       error_message = "NSGs must be blank or contain up to five valid network security group OCIDs, separated by commas or supplied as a JSON array string."
@@ -79,24 +87,4 @@ resource "oci_core_instance" "windows" {
       error_message = "Bootstrap exceeds the OCI user-data size limit; reduce embedded scripts."
     }
   }
-}
-
-resource "oci_identity_dynamic_group" "domain_join" {
-  count          = var.create_iam_resources ? 1 : 0
-  provider       = oci.home
-  compartment_id = var.tenancy_ocid
-  name           = "win-ad-${substr(sha256(oci_core_instance.windows.id), 0, 16)}"
-  description    = "Only the Windows instance created by this stack"
-  matching_rule  = "ALL {instance.id = '${oci_core_instance.windows.id}'}"
-}
-
-resource "oci_identity_policy" "domain_join" {
-  count          = var.create_iam_resources ? 1 : 0
-  provider       = oci.home
-  compartment_id = var.tenancy_ocid
-  name           = "${oci_identity_dynamic_group.domain_join[0].name}-secret"
-  description    = "Read only the selected AD join credential secret"
-  statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.domain_join[0].name} to read secret-bundles in compartment id ${var.secret_compartment_ocid} where target.secret.id = '${var.ad_credentials_secret_ocid}'"
-  ]
 }

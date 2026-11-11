@@ -1,40 +1,50 @@
 # OCI Windows AD Join
 
-Launch a Windows Server VM on Oracle Cloud Infrastructure and automatically join it to an existing Active Directory domain using an OCI Resource Manager stack.
+Launch Windows Server on Oracle Cloud Infrastructure and join an existing Active Directory domain using temporary OCI Vault access. Deploy shared IAM once, then reuse it for each new server.
 
-[![Deploy to Oracle Cloud](https://oci-resourcemanager-plugin.plugins.oci.oraclecloud.com/latest/deploy-to-oracle-cloud.svg)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/RichardORCL/OCI-Windows-AD-Join/raw/refs/heads/main/RMS/dist/oci-windows-ad-stack.zip)
+## 1. Create shared IAM once
 
-The button opens OCI Resource Manager with the packaged Terraform configuration and its setup form preloaded. You choose the deployment settings before creating resources.
+[![Deploy IAM to Oracle Cloud](https://oci-resourcemanager-plugin.plugins.oci.oraclecloud.com/latest/deploy-to-oracle-cloud.svg)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/RichardORCL/OCI-Windows-AD-Join/raw/refs/heads/main/RMS/dist/oci-windows-ad-iam-stack.zip)
 
-## What it provides
+The [IAM stack](RMS/iam/README.md) creates a dedicated defined-tag namespace/key, one reusable dynamic group, and scoped policies. Select the server compartment and an existing Vault secret. Copy its `server_stack_settings` output for use below. Allow time for IAM propagation before the first launch.
 
-- Windows Server 2019, 2022 or 2025 version dropdown and an OCI shape selector for x86 Standard Flex VMs.
-- Instance naming, OCPUs, RAM, boot volume, availability domain, existing network, subnet and optional network security groups.
-- AD domain, optional DNS override before joining, optional computer OU and an OCI Vault credential-secret selector.
-- Cloudbase-Init bootstrap with a scheduled domain join, reboot and guest-side verification.
-- Instance-specific IAM access to the selected secret, or an option to use existing IAM configuration.
+Create the Vault secret in the server deployment region using **Plain-Text** content with JSON for a delegated AD join account:
 
-The instance is private by default. Default sizing is 2 OCPUs, 16 GiB RAM and a 100 GiB boot volume. Image availability and capacity depend on the selected region and shape. OCI Compute, storage and Windows licensing charges apply.
+```json
+{"username":"join-service@corp.example.com","password":"REPLACE_WITH_REAL_PASSWORD"}
+```
 
-## Before deploying
+This step requires tenancy IAM/tag administration permissions. The group is restricted to the selected compartment and the bootstrap defined tag, defaulting to `ADJoinBootstrap.State=pending`.
 
-1. Prepare an existing IPv4 subnet with connectivity to your AD domain controllers and DNS servers. Allow the required AD traffic and outbound access to OCI authentication/Secrets APIs and PyPI for SDK installation.
-2. Create an OCI Vault secret in the deployment region. Choose **Plain-Text** and enter JSON containing a delegated domain-join account:
+## 2. Launch a server for each enrollment
 
-   ```json
-   {"username":"join-service@corp.example.com","password":"REPLACE_WITH_REAL_PASSWORD"}
-   ```
+[![Deploy Server to Oracle Cloud](https://oci-resourcemanager-plugin.plugins.oci.oraclecloud.com/latest/deploy-to-oracle-cloud.svg)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/RichardORCL/OCI-Windows-AD-Join/raw/refs/heads/main/RMS/dist/oci-windows-ad-stack.zip)
 
-3. Have permission to deploy Compute resources and use the chosen network. The default IAM setup also requires permission to manage tenancy dynamic groups and policies.
-4. Click **Deploy to Oracle Cloud**, complete the form, review the plan and apply the stack. Use a unique Windows computer name. If subnet/DHCP DNS cannot resolve your domain, enable **Override DNS servers before AD join** and enter one or more domain DNS server IPv4 addresses, separated by commas. The worker applies these servers and clears the DNS cache before domain discovery and joining. Leave the option unchecked to keep existing DNS.
+The [server stack](RMS/README.md) creates the instance with the temporary tag. It creates no IAM resources. Match the IAM stack's server compartment, secret OCID and tag namespace/key/value exactly. The deployment identity needs Compute/network permissions and permission to use the tag namespace.
 
-Only the Vault secret OCID enters Terraform. The guest retrieves the username and password directly through instance-principal authentication, keeping credential values out of Terraform state, outputs and user data. See the [credential handling and prerequisites](RMS/README.md#credentials-select-a-secret-not-a-password-input) for details.
+The setup form includes:
 
-Optional NSGs are entered as comma-separated OCIDs. Leave the field blank to attach none.
+- Windows Server 2019, 2022 or 2025 and an x86 Standard Flex shape selector.
+- Instance/computer name, OCPUs, memory, boot volume, availability domain and existing VCN/subnet.
+- Optional NSGs as comma-separated OCIDs; blank attaches none.
+- AD domain, OU, Vault secret and bootstrap tag settings.
+- **Override DNS servers before AD join**: apply domain DNS IPv4 addresses and clear the DNS cache before domain discovery and joining. Unchecked retains subnet/DHCP DNS.
+
+Defaults are a private instance, 2 OCPUs, 16 GiB RAM and a 100 GiB boot volume. Shape availability, capacity and Windows licensing charges depend on OCI. Your subnet must reach AD/DC DNS, regional OCI authentication/Compute/Secrets APIs and PyPI for SDK installation; see the detailed guide for routes, firewalls and prepared-image options.
+
+## Temporary secret access
+
+The guest retrieves the join username/password directly from Vault using instance-principal authentication. Credential values never enter Terraform state, outputs or user data.
+
+After joining and rebooting, the scheduled worker verifies the AD secure channel, removes its bootstrap tag and probes Vault until access is denied. Terraform ignores subsequent defined-tag changes so it does not restore the tag. Unrelated tags are preserved. Each guest can update only its own instance; it cannot update another enrollment server.
+
+**Tag-based revocation is eventual:** OCI documents about an hour for dynamic-group membership changes. The worker reports `revocation_pending` while Vault is still readable and marks `complete` only after tag removal and a fresh denied Vault call. Successful probes during propagation discard their bundles without logging. Existing issued identities may remain authorized while caches expire. Cleanup retries have a separate two-hour limit. [Oracle propagation guidance](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingdynamicgroups.htm).
+
+Bootstrap code must be trusted: a guest administrator could reapply the tag while its temporary self-update permission remains. Revocation also cannot erase already retrieved credentials. See the [IAM security and migration guide](RMS/iam/README.md) for these limits and handling failed enrollments or legacy per-instance policies.
 
 ## Check the result
 
-Terraform Apply completion confirms infrastructure provisioning. Check the domain join inside Windows:
+A successful Terraform Apply confirms infrastructure provisioning. Inspect the guest:
 
 ```powershell
 Get-Content C:\ProgramData\OCI-ADJoin\status.json
@@ -42,38 +52,31 @@ Get-CimInstance Win32_ComputerSystem | Select-Object Name, Domain, PartOfDomain
 Test-ComputerSecureChannel
 ```
 
-Expected final status is `complete`. See the [deployment and troubleshooting guide](RMS/README.md) for IAM, firewall requirements, retry behavior, recovery and cleanup.
+Final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Failures during tag removal or revocation checking remain incomplete and require attention. Delete/terminate failed enrollment instances or remove their bootstrap tags administratively. Keep shared IAM until no further server deployments need it.
 
-## Repository layout
+## Repository and development
 
 | Path | Contents |
 | --- | --- |
-| [`RMS/`](RMS/) | Terraform stack and Resource Manager YAML form |
-| [`RMS/scripts/`](RMS/scripts/) | Windows bootstrap, Vault helper and ZIP packaging script |
-| [`RMS/tests/`](RMS/tests/) | Offline Terraform plans and Python tests |
-| [`RMS/dist/oci-windows-ad-stack.zip`](RMS/dist/oci-windows-ad-stack.zip) | Upload-ready package used by the deployment button |
+| [`RMS/iam/`](RMS/iam/) | Shared IAM stack, YAML form and offline tests |
+| [`RMS/`](RMS/) | Server Terraform stack and YAML form |
+| [`RMS/scripts/`](RMS/scripts/) | Windows bootstrap, Vault reader, access cleanup and packaging |
+| [`RMS/tests/`](RMS/tests/) | Server plans and Python credential/cleanup/package tests |
+| [`RMS/dist/`](RMS/dist/) | Separate upload-ready IAM and server ZIPs used by the buttons |
 
-To rebuild the deployment ZIP after editing the stack:
+Rebuild both deployment archives after source changes, and commit them with the sources:
 
 ```sh
 python3 RMS/scripts/package_stack.py
+terraform -chdir=RMS init
+terraform -chdir=RMS test
+terraform -chdir=RMS/iam init
+terraform -chdir=RMS/iam test
+python3 -m unittest discover -s RMS/tests -p 'test_*.py'
 ```
 
-Commit the updated ZIP together with the source changes. The deployment button uses the packaged configuration on `main`.
+Deployment requires Terraform >=1.2; mocked plan tests require >=1.7. Offline tests create no OCI resources. Both forms are checked against Oracle's published Resource Manager schema. Live Windows boot, policy enforcement and revocation timing still need validation in your tenancy.
 
-## Validation
-
-Terraform configuration validation, the form's validation against Oracle's published schema, fourteen mocked Terraform plan tests and five Python tests passed during development. A live Windows boot and AD join must still be verified in your tenancy.
-
-```sh
-cd RMS
-terraform init
-terraform validate
-terraform fmt -check -recursive
-terraform test
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
-
-Deployment requires Terraform 1.2 or newer; the mocked Terraform tests require 1.7 or newer. No OCI resources are deployed by the tests.
+Existing version 1 stacks retain their old source. Deploy the new shared IAM stack and use the server package for new stacks; review the [migration guidance](RMS/iam/README.md#lifecycle-and-migration) before changing retained stacks. No live OCI resources are changed by this repository update.
 
 Maintainer: [RichardORCL](https://github.com/RichardORCL).

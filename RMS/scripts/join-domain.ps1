@@ -17,6 +17,27 @@ function Save-Progress {
     $script:progress | ConvertTo-Json | Set-Content $stateFile -Encoding UTF8
 }
 
+function Initialize-OciSdk {
+    # Reuse the runtime shipped with OCI Windows Cloudbase-Init, installing SDK
+    # packages into a separate directory so its own environment is not modified.
+    $python = @(
+        "$env:ProgramFiles\Cloudbase Solutions\Cloudbase-Init\Python\python.exe",
+        "${env:ProgramFiles(x86)}\Cloudbase Solutions\Cloudbase-Init\Python\python.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $python) { throw 'Cloudbase-Init Python runtime missing' }
+    $sdk = Join-Path $root 'sdk'
+    $ready = Join-Path $sdk '.ready-2.191.0'
+    if (-not (Test-Path $ready)) {
+        & $python -m pip --version *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Bundled Python must include pip; use a prepared image as documented' }
+        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --target $sdk 'oci==2.191.0' *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'OCI SDK install failed' }
+        New-Item -ItemType File -Path $ready -Force | Out-Null
+    }
+
+    return $python
+}
+
 $stage = 'initialization'
 try {
     if (Test-Path $stateFile) {
@@ -26,11 +47,18 @@ try {
             deadline = [DateTime]::UtcNow.AddHours(6).ToString('o')
             attempts = 0
             pending_boot = ''
+            cleanup_deadline = ''
+            tag_removed = $false
         }
         Save-Progress
     }
-    if ([DateTime]::UtcNow -gt [DateTime]::Parse($progress.deadline).ToUniversalTime() -or $progress.attempts -ge 72) {
+    if (-not $progress.cleanup_deadline -and ([DateTime]::UtcNow -gt [DateTime]::Parse($progress.deadline).ToUniversalTime() -or $progress.attempts -ge 72)) {
         Write-Status 'failed' 'retry-window-expired'
+        Stop-JoinTask
+        exit 1
+    }
+    if ($progress.cleanup_deadline -and [DateTime]::UtcNow -gt [DateTime]::Parse($progress.cleanup_deadline).ToUniversalTime()) {
+        Write-Status 'failed' 'access-cleanup-window-expired'
         Stop-JoinTask
         exit 1
     }
@@ -59,7 +87,28 @@ try {
         }
         $stage = 'secure-channel-verification'
         if (-not (Test-ComputerSecureChannel -ErrorAction Stop)) { throw 'Secure channel unavailable' }
-        Write-Status 'complete' 'verified-after-reboot'
+        if (-not $progress.cleanup_deadline) {
+            $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
+            Save-Progress
+        }
+        $stage = 'sdk-install'
+        $python = Initialize-OciSdk
+        if (-not $progress.tag_removed) {
+            $stage = 'bootstrap-tag-removal'
+            & $python (Join-Path $root 'cleanup_access.py') 'remove-tag' *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'Bootstrap tag removal failed' }
+            $progress.tag_removed = $true
+            Save-Progress
+        }
+        $stage = 'vault-revocation'
+        & $python (Join-Path $root 'cleanup_access.py') 'verify-revocation' *> $null
+        $probeResult = $LASTEXITCODE
+        if ($probeResult -eq 10) {
+            Write-Status 'revocation_pending' 'vault-access-still-active'
+            exit 0
+        }
+        if ($probeResult -ne 0) { throw 'Vault access denial could not be verified' }
+        Write-Status 'complete' 'domain-verified-tag-removed-vault-denied'
         Stop-JoinTask
         exit 0
     }
@@ -75,22 +124,7 @@ try {
     Resolve-DnsName -Name ('_ldap._tcp.dc._msdcs.' + $config.domain) -Type SRV -DnsOnly -ErrorAction Stop | Out-Null
 
     $stage = 'sdk-install'
-    # Reuse the runtime shipped with OCI Windows Cloudbase-Init, installing SDK
-    # packages into a separate directory so its own environment is not modified.
-    $python = @(
-        "$env:ProgramFiles\Cloudbase Solutions\Cloudbase-Init\Python\python.exe",
-        "${env:ProgramFiles(x86)}\Cloudbase Solutions\Cloudbase-Init\Python\python.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $python) { throw 'Cloudbase-Init Python runtime missing' }
-    $sdk = Join-Path $root 'sdk'
-    $ready = Join-Path $sdk '.ready-2.191.0'
-    if (-not (Test-Path $ready)) {
-        & $python -m pip --version *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'Bundled Python must include pip; use a prepared image as documented' }
-        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --target $sdk 'oci==2.191.0' *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'OCI SDK install failed' }
-        New-Item -ItemType File -Path $ready -Force | Out-Null
-    }
+    $python = Initialize-OciSdk
 
     $stage = 'vault-retrieval'
     # Never run this helper interactively or redirect its stdout to a file.
@@ -113,6 +147,7 @@ try {
     if ($config.ou_path) { $join.OUPath = $config.ou_path }
     # No -Restart: persist progress before explicitly scheduling the reboot.
     Add-Computer @join | Out-Null
+    $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
     $progress.pending_boot = $boot
     Save-Progress
     Write-Status 'joined_pending_reboot' 'reboot'

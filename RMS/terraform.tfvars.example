@@ -1,5 +1,4 @@
 # Copy to terraform.tfvars for CLI use. Never put credentials in this file.
-tenancy_ocid              = "ocid1.tenancy.oc1..REPLACE"
 compartment_ocid          = "ocid1.compartment.oc1..REPLACE"
 region                    = "eu-amsterdam-1"
 availability_domain       = "REPLACE:EU-AMSTERDAM-1-AD-1"
@@ -12,3 +11,7 @@ ad_dns_servers           = "10.0.0.10,10.0.0.11"
 ad_ou_path                = "OU=Servers,DC=corp,DC=example,DC=com"
 secret_compartment_ocid   = "ocid1.compartment.oc1..REPLACE"
 ad_credentials_secret_ocid = "ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE"
+# Must match the separately deployed IAM stack.
+bootstrap_tag_namespace = "ADJoinBootstrap"
+bootstrap_tag_key       = "State"
+bootstrap_tag_value     = "pending"

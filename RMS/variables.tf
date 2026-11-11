@@ -1,7 +1,3 @@
-variable "tenancy_ocid" {
-  type        = string
-  description = "Tenancy OCID (injected by Resource Manager)."
-}
 variable "compartment_ocid" {
   type        = string
   description = "Compartment for the instance."
@@ -132,8 +128,31 @@ variable "ad_credentials_secret_ocid" {
     error_message = "Choose an existing OCI Vault secret."
   }
 }
-variable "create_iam_resources" {
-  type        = bool
-  default     = true
-  description = "Create an instance-specific dynamic group and secret-read policy. Disable only with preconfigured instance-principal access."
+
+variable "bootstrap_tag_namespace" {
+  type        = string
+  default     = "ADJoinBootstrap"
+  description = "Bootstrap defined-tag namespace; must match the reusable IAM stack."
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9_]{0,63}$", var.bootstrap_tag_namespace))
+    error_message = "Use 1–64 letters, digits or underscores, starting with a letter."
+  }
+}
+variable "bootstrap_tag_key" {
+  type        = string
+  default     = "State"
+  description = "Bootstrap defined-tag key; must match the reusable IAM stack."
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9_]{0,63}$", var.bootstrap_tag_key))
+    error_message = "Use 1–64 letters, digits or underscores, starting with a letter."
+  }
+}
+variable "bootstrap_tag_value" {
+  type        = string
+  default     = "pending"
+  description = "Bootstrap defined-tag value; must match the reusable IAM stack."
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9_]{0,63}$", var.bootstrap_tag_value))
+    error_message = "Use 1–64 letters, digits or underscores, starting with a letter."
+  }
 }

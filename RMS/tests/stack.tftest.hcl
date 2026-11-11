@@ -1,20 +1,10 @@
 # Offline plans: mocks never authenticate to OCI or provision resources.
 mock_provider "oci" {
-  mock_data "oci_identity_regions" {
-    defaults = { regions = [{ name = "eu-amsterdam-1", key = "AMS" }] }
-  }
-  mock_data "oci_identity_tenancy" {
-    defaults = { home_region_key = "AMS" }
-  }
   mock_data "oci_core_images" {
     defaults = { images = [{ id = "ocid1.image.oc1.eu-amsterdam-1.test" }] }
   }
 }
-mock_provider "oci" {
-  alias = "home"
-}
 variables {
-  tenancy_ocid               = "ocid1.tenancy.oc1..test"
   compartment_ocid           = "ocid1.compartment.oc1..test"
   region                     = "eu-amsterdam-1"
   availability_domain        = "test:EU-AMSTERDAM-1-AD-1"
@@ -37,24 +27,20 @@ run "default_private_instance" {
     error_message = "Windows user data must use the Cloudbase-Init PowerShell header."
   }
   assert {
-    condition     = length(oci_identity_dynamic_group.domain_join) == 1 && length(oci_identity_policy.domain_join) == 1
-    error_message = "Create dedicated IAM resources by default."
+    condition     = oci_core_instance.windows.defined_tags["ADJoinBootstrap.State"] == "pending"
+    error_message = "Each new server must carry the shared bootstrap tag at launch."
   }
 }
-run "explicit_image_and_existing_iam" {
+run "explicit_image_override" {
   command = plan
   variables {
-    image_ocid           = "ocid1.image.oc1.eu-amsterdam-1.override"
-    create_iam_resources = false
+    image_ocid = "ocid1.image.oc1.eu-amsterdam-1.override"
   }
   assert {
     condition     = oci_core_instance.windows.source_details[0].source_id == "ocid1.image.oc1.eu-amsterdam-1.override" && length(data.oci_core_images.windows) == 0
     error_message = "An image override must bypass automatic image lookup."
   }
-  assert {
-    condition     = length(oci_identity_dynamic_group.domain_join) == 0 && length(oci_identity_policy.domain_join) == 0
-    error_message = "Existing IAM mode must not create IAM resources."
-  }
+
 }
 run "no_compatible_image" {
   command = plan
@@ -160,4 +146,17 @@ run "reject_too_many_nsgs" {
     nsg_ocids = "ocid1.networksecuritygroup.oc1..a,ocid1.networksecuritygroup.oc1..b,ocid1.networksecuritygroup.oc1..c,ocid1.networksecuritygroup.oc1..d,ocid1.networksecuritygroup.oc1..e,ocid1.networksecuritygroup.oc1..f"
   }
   expect_failures = [oci_core_instance.windows]
+}
+
+run "custom_bootstrap_tag" {
+  command = plan
+  variables {
+    bootstrap_tag_namespace = "CorpADJoin"
+    bootstrap_tag_key       = "Enrollment"
+    bootstrap_tag_value     = "enabled"
+  }
+  assert {
+    condition     = oci_core_instance.windows.defined_tags["CorpADJoin.Enrollment"] == "enabled" && local.bootstrap_config.tag_namespace == "CorpADJoin" && local.bootstrap_config.tag_key == "Enrollment"
+    error_message = "The launch tag and guest cleanup configuration must agree."
+  }
 }

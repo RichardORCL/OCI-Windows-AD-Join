@@ -1,0 +1,62 @@
+title: Windows AD Join — reusable IAM setup
+description: Create a reusable tag-based dynamic group, bootstrap tag definition and scoped policies. Deploy once before launching server stacks.
+schemaVersion: 1.1.0
+version: "2.0.0"
+locale: en
+variableGroups:
+  - title: Hidden
+    visible: false
+    variables: [tenancy_ocid]
+  - title: Scope
+    variables: [region, instance_compartment_ocid, secret_compartment_ocid, ad_credentials_secret_ocid]
+  - title: Reusable bootstrap identity
+    variables: [iam_name, bootstrap_tag_namespace, bootstrap_tag_key, bootstrap_tag_value]
+variables:
+  tenancy_ocid:
+    type: string
+    visible: false
+  region:
+    type: oci:identity:region:name
+    title: Deployment region
+    description: Select the region where the secret and servers will be deployed. IAM resources are created in the tenancy home region.
+    required: true
+  instance_compartment_ocid:
+    type: oci:identity:compartment:id
+    title: Allowed server compartment
+    description: Only instances in this compartment with the bootstrap tag belong to the dynamic group.
+    required: true
+  secret_compartment_ocid:
+    type: oci:identity:compartment:id
+    title: Secret compartment
+    required: true
+  ad_credentials_secret_ocid:
+    type: oci:kms:secret:id
+    title: AD join credential secret
+    required: true
+    dependsOn:
+      compartmentId: ${secret_compartment_ocid}
+  iam_name:
+    type: string
+    title: Dynamic group name
+    default: windows-ad-join-bootstrap
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$'
+  bootstrap_tag_namespace:
+    type: string
+    title: New bootstrap tag namespace
+    description: Use a dedicated, unused namespace name. For an existing namespace, import it into this IAM stack before applying.
+    default: ADJoinBootstrap
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+  bootstrap_tag_key:
+    type: string
+    title: Bootstrap tag key
+    default: State
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+  bootstrap_tag_value:
+    type: string
+    title: Bootstrap tag value
+    default: pending
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'

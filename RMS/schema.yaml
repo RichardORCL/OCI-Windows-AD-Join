@@ -1,12 +1,9 @@
 title: Windows Server — join existing Active Directory
 description: Launch a Windows VM in an existing network and join AD using credentials retrieved directly from OCI Vault by the instance.
 schemaVersion: 1.1.0
-version: "1.0.1"
+version: "2.0.0"
 locale: en
 variableGroups:
-  - title: Hidden
-    visible: false
-    variables: [tenancy_ocid]
   - title: Placement
     variables: [compartment_ocid, region, availability_domain]
   - title: Server
@@ -16,11 +13,10 @@ variableGroups:
   - title: Active Directory
     variables: [ad_domain_name, override_dns, ad_dns_servers, ad_ou_path]
   - title: Join credentials in OCI Vault
-    variables: [secret_compartment_ocid, ad_credentials_secret_ocid, create_iam_resources]
+    variables: [secret_compartment_ocid, ad_credentials_secret_ocid]
+  - title: Temporary bootstrap tag (match the IAM stack)
+    variables: [bootstrap_tag_namespace, bootstrap_tag_key, bootstrap_tag_value]
 variables:
-  tenancy_ocid:
-    type: string
-    visible: false
   compartment_ocid:
     type: oci:identity:compartment:id
     title: Instance compartment
@@ -161,8 +157,24 @@ variables:
     required: true
     dependsOn:
       compartmentId: ${secret_compartment_ocid}
-  create_iam_resources:
-    type: boolean
-    title: Create instance-specific Vault access
-    description: Requires permission to manage dynamic groups and policies in the tenancy. Disable only if an administrator has preconfigured access.
-    default: true
+  bootstrap_tag_namespace:
+    type: string
+    title: Bootstrap tag namespace
+    description: Must match the IAM stack. The tag is removed after verified domain join.
+    default: ADJoinBootstrap
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+  bootstrap_tag_key:
+    type: string
+    title: Bootstrap tag key
+    description: Must match the IAM stack. The tag is removed after verified domain join.
+    default: State
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+  bootstrap_tag_value:
+    type: string
+    title: Bootstrap tag value
+    description: Must match the IAM stack. The tag is removed after verified domain join.
+    default: pending
+    required: true
+    pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'

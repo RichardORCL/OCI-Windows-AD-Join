@@ -8,3 +8,4 @@ crash.log
 __pycache__/
 dist/*.zip
 !dist/oci-windows-ad-stack.zip
+!dist/oci-windows-ad-iam-stack.zip

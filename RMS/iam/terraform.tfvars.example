@@ -1,0 +1,5 @@
+tenancy_ocid = "ocid1.tenancy.oc1..REPLACE"
+region = "eu-amsterdam-1"
+instance_compartment_ocid = "ocid1.compartment.oc1..REPLACE"
+secret_compartment_ocid = "ocid1.compartment.oc1..REPLACE"
+ad_credentials_secret_ocid = "ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE"
