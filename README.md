@@ -30,6 +30,8 @@ The instance is private by default. Default sizing is 2 OCPUs, 16 GiB RAM and a 
 
 Only the Vault secret OCID enters Terraform. The guest retrieves the username and password directly through instance-principal authentication, keeping credential values out of Terraform state, outputs and user data. See the [credential handling and prerequisites](RMS/README.md#credentials-select-a-secret-not-a-password-input) for details.
 
+Optional NSGs are entered as comma-separated OCIDs. Leave the field blank to attach none.
+
 ## Check the result
 
 Terraform Apply completion confirms infrastructure provisioning. Check the domain join inside Windows:
@@ -61,7 +63,7 @@ Commit the updated ZIP together with the source changes. The deployment button u
 
 ## Validation
 
-Terraform configuration validation, the form's validation against Oracle's published schema, nine mocked Terraform plan tests and five Python tests passed during development. A live Windows boot and AD join must still be verified in your tenancy.
+Terraform configuration validation, the form's validation against Oracle's published schema, fourteen mocked Terraform plan tests and five Python tests passed during development. A live Windows boot and AD join must still be verified in your tenancy.
 
 ```sh
 cd RMS

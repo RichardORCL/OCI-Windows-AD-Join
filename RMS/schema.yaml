@@ -1,7 +1,7 @@
 title: Windows Server — join existing Active Directory
 description: Launch a Windows VM in an existing network and join AD using credentials retrieved directly from OCI Vault by the instance.
 schemaVersion: 1.1.0
-version: "1.0.0"
+version: "1.0.1"
 locale: en
 variableGroups:
   - title: Hidden
@@ -114,17 +114,11 @@ variables:
       compartmentId: ${network_compartment_ocid}
       vcnId: ${vcn_ocid}
   nsg_ocids:
-    type: array
+    type: string
     title: Network security groups (optional)
+    description: Leave blank for no NSGs, or paste up to five NSG OCIDs separated by commas. All NSGs must belong to the selected VCN.
     required: false
-    default: []
-    maxItems: 5
-    uniqueItems: true
-    items:
-      type: oci:core:nsg:id
-      dependsOn:
-        compartmentId: ${network_compartment_ocid}
-        vcnId: ${vcn_ocid}
+    default: ""
   private_ip:
     type: string
     title: Optional private IPv4 address

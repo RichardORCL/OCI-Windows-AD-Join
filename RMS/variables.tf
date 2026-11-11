@@ -80,8 +80,9 @@ variable "subnet_ocid" {
   type = string
 }
 variable "nsg_ocids" {
-  type    = list(string)
-  default = []
+  type        = string
+  default     = ""
+  description = "Optional comma-separated NSG OCIDs or a JSON array encoded as a string. Blank attaches no NSGs."
 }
 variable "assign_public_ip" {
   type    = bool

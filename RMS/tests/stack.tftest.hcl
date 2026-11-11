@@ -116,3 +116,48 @@ run "reject_invalid_dns_address" {
   }
   expect_failures = [var.ad_dns_servers]
 }
+
+run "blank_nsg_input" {
+  command = plan
+  variables {
+    nsg_ocids = ""
+  }
+  assert {
+    condition     = length(oci_core_instance.windows.create_vnic_details[0].nsg_ids) == 0
+    error_message = "An empty Resource Manager NSG value must attach no NSGs."
+  }
+}
+run "comma_separated_nsgs" {
+  command = plan
+  variables {
+    nsg_ocids = "ocid1.networksecuritygroup.oc1.eu-amsterdam-1.first, ocid1.networksecuritygroup.oc1.eu-amsterdam-1.second"
+  }
+  assert {
+    condition     = length(oci_core_instance.windows.create_vnic_details[0].nsg_ids) == 2 && contains(oci_core_instance.windows.create_vnic_details[0].nsg_ids, "ocid1.networksecuritygroup.oc1.eu-amsterdam-1.second")
+    error_message = "Comma-separated NSGs must be trimmed and attached."
+  }
+}
+run "json_nsg_input" {
+  command = plan
+  variables {
+    nsg_ocids = "[\"ocid1.networksecuritygroup.oc1.eu-amsterdam-1.first\"]"
+  }
+  assert {
+    condition     = length(oci_core_instance.windows.create_vnic_details[0].nsg_ids) == 1
+    error_message = "A JSON array string must be supported for Resource Manager/API input."
+  }
+}
+run "reject_invalid_nsg" {
+  command = plan
+  variables {
+    nsg_ocids = "not-an-ocid"
+  }
+  expect_failures = [oci_core_instance.windows]
+}
+run "reject_too_many_nsgs" {
+  command = plan
+  variables {
+    nsg_ocids = "ocid1.networksecuritygroup.oc1..a,ocid1.networksecuritygroup.oc1..b,ocid1.networksecuritygroup.oc1..c,ocid1.networksecuritygroup.oc1..d,ocid1.networksecuritygroup.oc1..e,ocid1.networksecuritygroup.oc1..f"
+  }
+  expect_failures = [oci_core_instance.windows]
+}

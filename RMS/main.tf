@@ -14,6 +14,11 @@ data "oci_core_images" "windows" {
 }
 
 locals {
+  # Resource Manager can submit an unfilled optional field as an empty string.
+  # Accept it as a string first, then normalize to the provider's list of IDs.
+  nsg_ids = trimspace(var.nsg_ocids) == "" ? [] : distinct([
+    for id in try(tolist(jsondecode(var.nsg_ocids)), split(",", var.nsg_ocids)) : try(trimspace(id), "")
+  ])
   image_id = var.image_ocid != "" ? var.image_ocid : try(data.oci_core_images.windows[0].images[0].id, null)
   bootstrap_config = {
     computer_name = upper(var.computer_name)
@@ -49,7 +54,7 @@ resource "oci_core_instance" "windows" {
     subnet_id        = var.subnet_ocid
     assign_public_ip = var.assign_public_ip
     private_ip       = var.private_ip == "" ? null : var.private_ip
-    nsg_ids          = var.nsg_ocids
+    nsg_ids          = local.nsg_ids
     # Do not publish a VCN DNS hostname which conflicts with AD DNS ownership.
   }
   metadata = { user_data = base64encode(local.user_data) }
@@ -57,6 +62,10 @@ resource "oci_core_instance" "windows" {
     are_legacy_imds_endpoints_disabled = true
   }
   lifecycle {
+    precondition {
+      condition     = length(local.nsg_ids) <= 5 && alltrue([for id in local.nsg_ids : can(regex("^ocid1\\.networksecuritygroup\\.[A-Za-z0-9._-]+$", id))])
+      error_message = "NSGs must be blank or contain up to five valid network security group OCIDs, separated by commas or supplied as a JSON array string."
+    }
     precondition {
       condition     = !var.override_dns || trimspace(var.ad_dns_servers) != ""
       error_message = "Enter at least one DNS server IPv4 address when Override DNS servers before AD join is enabled."

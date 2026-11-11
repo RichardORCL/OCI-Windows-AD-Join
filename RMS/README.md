@@ -21,7 +21,7 @@ Only the secret OCID enters Terraform variables, user data and state. The Window
 ## Prerequisites
 
 - An existing AD domain and a **unique computer name** (1–15 characters). Optional OU distinguished name, such as `OU=Servers,DC=corp,DC=example,DC=com`.
-- An existing IPv4 subnet with routing through your VCN, peering, VPN or FastConnect to the domain controllers. This stack does not create networks or firewall rules. Choose NSGs in the selected VCN and ensure the subnet belongs to it. RDP access must come through existing network rules/VPN/bastion; adding a public IP does not open RDP.
+- An existing IPv4 subnet with routing through your VCN, peering, VPN or FastConnect to the domain controllers. This stack does not create networks or firewall rules. Enter optional NSGs as comma-separated OCIDs (up to five); leave the field blank to attach none. Choose NSGs in the selected VCN and ensure the subnet belongs to it. RDP access must come through existing network rules/VPN/bastion; adding a public IP does not open RDP.
 - Reachable AD DNS resolvers. Enable **Override DNS servers before AD join** to set the supplied DNS addresses on the primary interface and clear the DNS cache before domain discovery and joining. The override persists after reboot. Leave it unchecked (the default) to retain subnet/DHCP DNS; those resolvers must already resolve the AD domain. When enabled, at least one valid IPv4 address is required; separate multiple addresses with commas. For CLI use set `override_dns = true` together with `ad_dns_servers`. They must resolve the AD SRV records **and** public OCI/PyPI names, using forwarding where necessary. Allow AD traffic through security lists/NSGs, Windows Firewall and intervening firewalls: DNS TCP/UDP 53, Kerberos TCP/UDP 88 and 464, LDAP TCP/UDP 389, SMB TCP 445, RPC TCP 135 and dynamic RPC TCP 49152–65535, and time synchronization UDP 123 where applicable. Additional ports depend on your AD configuration; see Microsoft's reference below. Keep clocks synchronized with the domain.
 - HTTPS access to regional OCI authentication and Secrets endpoints and to `pypi.org` / `files.pythonhosted.org`. A private subnet normally needs NAT for PyPI (a service gateway alone does not reach it). IMDS at `169.254.169.254` must remain reachable without a proxy. Do not block OCI Windows activation traffic at `169.254.169.253`.
 - The platform image's Cloudbase-Init Python runtime with pip. The worker discovers the standard `Cloudbase-Init\Python\python.exe` location and installs `oci==2.191.0` into a separate `C:\ProgramData\OCI-ADJoin\sdk` directory. It does not modify Cloudbase-Init's site-packages. For restricted networks, prepare an **unjoined** custom image with this SDK and dependencies in that directory and a `.ready-2.191.0` marker; test the helper's imports under the bundled Python. A private package mirror can also be configured in the image's pip settings. Runtime and wheels must be compatible; this has not been boot-tested on every image family.
@@ -38,6 +38,17 @@ Allow dynamic-group <group-name> to read secret-bundles in compartment id <secre
 ```
 
 The automatically created IAM resources necessarily follow instance creation, so the worker retries while IAM propagates. It does not need user API keys. Existing IAM mode does not create, inspect or manage your preconfigured policies. Deleting or replacing the instance updates/removes the stack-managed group and policy; deleting the stack does not delete the existing Vault secret.
+
+## Optional NSGs and existing stack configurations
+
+`nsg_ocids` is a string to accommodate Resource Manager submitting empty optional fields as `""`. Blank means no NSGs. Supply comma-separated OCIDs, or a JSON array encoded as a string for CLI/API use:
+
+```hcl
+nsg_ocids = "ocid1.networksecuritygroup.oc1..first,ocid1.networksecuritygroup.oc1..second"
+# Alternative: nsg_ocids = "[\"ocid1.networksecuritygroup.oc1..first\"]"
+```
+
+If an existing stack fails with `Missing expression` for `var.nsg_ocids`, edit the stack and upload the updated deployment ZIP before retrying Plan. Existing stacks retain their old Terraform source until explicitly updated. Then leave the NSG field blank or enter valid OCIDs. As a temporary workaround for the old list-typed configuration, set its saved `nsg_ocids` variable to the literal string `[]` via the Resource Manager API/CLI; an empty string is not a valid Terraform list expression.
 
 ## Bootstrap and verifying the join
 
@@ -93,7 +104,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 python3 scripts/package_stack.py
 ```
 
-Validation passed for Terraform/provider schema (Terraform 1.7.5 / OCI provider 8.29.0), all nine offline plans, all five Python tests, and the YAML form against Oracle's published Resource Manager JSON schema. This does not replace a real deployment test with your AD, subnet, IAM and Windows image. PowerShell must be tested on Windows; it is not available in the development environment used to build this stack.
+Validation passed for Terraform/provider schema (Terraform 1.7.5 / OCI provider 8.29.0), all fourteen offline plans, all five Python tests, and the YAML form against Oracle's published Resource Manager JSON schema. This does not replace a real deployment test with your AD, subnet, IAM and Windows image. PowerShell must be tested on Windows; it is not available in the development environment used to build this stack.
 
 ## References
 
