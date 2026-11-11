@@ -65,9 +65,13 @@ try {
     }
 
     $stage = 'dns'
-    $nic = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
-    if (-not $nic) { throw 'No primary network interface' }
-    Set-DnsClientServerAddress -InterfaceIndex $nic.InterfaceIndex -ServerAddresses @($config.dns_servers)
+    if ($config.override_dns) {
+        if (@($config.dns_servers).Count -eq 0) { throw 'DNS override requires at least one server' }
+        $nic = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
+        if (-not $nic) { throw 'No primary network interface' }
+        Set-DnsClientServerAddress -InterfaceIndex $nic.InterfaceIndex -ServerAddresses @($config.dns_servers)
+        Clear-DnsClientCache
+    }
     Resolve-DnsName -Name ('_ldap._tcp.dc._msdcs.' + $config.domain) -Type SRV -DnsOnly -ErrorAction Stop | Out-Null
 
     $stage = 'sdk-install'

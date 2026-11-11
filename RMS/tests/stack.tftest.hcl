@@ -78,3 +78,41 @@ run "reject_bad_computer_name" {
   }
   expect_failures = [var.computer_name]
 }
+
+run "retain_existing_dns" {
+  command = plan
+  variables {
+    ad_dns_servers = ""
+  }
+  assert {
+    condition     = !local.bootstrap_config.override_dns && length(local.bootstrap_config.dns_servers) == 0
+    error_message = "By default the guest must retain its existing DNS configuration."
+  }
+}
+run "custom_dns_before_join" {
+  command = plan
+  variables {
+    override_dns   = true
+    ad_dns_servers = "10.0.0.10, 10.0.0.11"
+  }
+  assert {
+    condition     = local.bootstrap_config.override_dns && join(",", local.bootstrap_config.dns_servers) == "10.0.0.10,10.0.0.11"
+    error_message = "DNS override must deliver the selected servers in order, with whitespace removed."
+  }
+}
+run "reject_empty_dns_override" {
+  command = plan
+  variables {
+    override_dns   = true
+    ad_dns_servers = ""
+  }
+  expect_failures = [oci_core_instance.windows]
+}
+run "reject_invalid_dns_address" {
+  command = plan
+  variables {
+    override_dns   = true
+    ad_dns_servers = "10.0.0.10,999.0.0.1"
+  }
+  expect_failures = [var.ad_dns_servers]
+}

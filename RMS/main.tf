@@ -18,7 +18,8 @@ locals {
   bootstrap_config = {
     computer_name = upper(var.computer_name)
     domain        = lower(var.ad_domain_name)
-    dns_servers   = [for ip in split(",", var.ad_dns_servers) : trimspace(ip)]
+    override_dns  = var.override_dns
+    dns_servers   = var.override_dns ? [for ip in split(",", var.ad_dns_servers) : trimspace(ip) if trimspace(ip) != ""] : []
     ou_path       = var.ad_ou_path
     secret_id     = var.ad_credentials_secret_ocid
     region        = var.region
@@ -56,6 +57,10 @@ resource "oci_core_instance" "windows" {
     are_legacy_imds_endpoints_disabled = true
   }
   lifecycle {
+    precondition {
+      condition     = !var.override_dns || trimspace(var.ad_dns_servers) != ""
+      error_message = "Enter at least one DNS server IPv4 address when Override DNS servers before AD join is enabled."
+    }
     precondition {
       condition     = local.image_id != null
       error_message = "No compatible Windows Standard Edition VM platform image found for this version/shape/region. Choose another combination or supply an image override."

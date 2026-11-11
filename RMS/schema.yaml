@@ -14,7 +14,7 @@ variableGroups:
   - title: Existing network
     variables: [network_compartment_ocid, vcn_ocid, subnet_ocid, nsg_ocids, private_ip, assign_public_ip]
   - title: Active Directory
-    variables: [ad_domain_name, ad_dns_servers, ad_ou_path]
+    variables: [ad_domain_name, override_dns, ad_dns_servers, ad_ou_path]
   - title: Join credentials in OCI Vault
     variables: [secret_compartment_ocid, ad_credentials_secret_ocid, create_iam_resources]
 variables:
@@ -140,11 +140,17 @@ variables:
     title: Existing AD DNS domain
     description: For example corp.example.com
     required: true
+  override_dns:
+    type: boolean
+    title: Override DNS servers before AD join
+    description: Set DNS on the primary Windows network interface before domain discovery and joining. Leave unchecked to retain subnet/DHCP DNS, which must resolve the AD domain.
+    default: false
   ad_dns_servers:
     type: string
     title: AD DNS server IPv4 addresses
     description: Comma-separated, for example 10.0.0.10,10.0.0.11. These resolvers must also resolve public/OCI names.
     required: true
+    visible: ${override_dns}
   ad_ou_path:
     type: string
     title: Computer OU distinguished name (optional)

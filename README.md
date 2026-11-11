@@ -10,7 +10,7 @@ The button opens OCI Resource Manager with the packaged Terraform configuration 
 
 - Windows Server 2019, 2022 or 2025 version dropdown and an OCI shape selector for x86 Standard Flex VMs.
 - Instance naming, OCPUs, RAM, boot volume, availability domain, existing network, subnet and optional network security groups.
-- AD domain, DNS resolvers, optional computer OU and an OCI Vault credential-secret selector.
+- AD domain, optional DNS override before joining, optional computer OU and an OCI Vault credential-secret selector.
 - Cloudbase-Init bootstrap with a scheduled domain join, reboot and guest-side verification.
 - Instance-specific IAM access to the selected secret, or an option to use existing IAM configuration.
 
@@ -26,7 +26,7 @@ The instance is private by default. Default sizing is 2 OCPUs, 16 GiB RAM and a 
    ```
 
 3. Have permission to deploy Compute resources and use the chosen network. The default IAM setup also requires permission to manage tenancy dynamic groups and policies.
-4. Click **Deploy to Oracle Cloud**, complete the form, review the plan and apply the stack. Use a unique Windows computer name.
+4. Click **Deploy to Oracle Cloud**, complete the form, review the plan and apply the stack. Use a unique Windows computer name. If subnet/DHCP DNS cannot resolve your domain, enable **Override DNS servers before AD join** and enter one or more domain DNS server IPv4 addresses, separated by commas. The worker applies these servers and clears the DNS cache before domain discovery and joining. Leave the option unchecked to keep existing DNS.
 
 Only the Vault secret OCID enters Terraform. The guest retrieves the username and password directly through instance-principal authentication, keeping credential values out of Terraform state, outputs and user data. See the [credential handling and prerequisites](RMS/README.md#credentials-select-a-secret-not-a-password-input) for details.
 
@@ -61,7 +61,7 @@ Commit the updated ZIP together with the source changes. The deployment button u
 
 ## Validation
 
-Terraform configuration validation, the form's validation against Oracle's published schema, five mocked Terraform plan tests and five Python tests passed during development. A live Windows boot and AD join must still be verified in your tenancy.
+Terraform configuration validation, the form's validation against Oracle's published schema, nine mocked Terraform plan tests and five Python tests passed during development. A live Windows boot and AD join must still be verified in your tenancy.
 
 ```sh
 cd RMS

@@ -102,11 +102,17 @@ variable "ad_domain_name" {
     error_message = "Enter the existing AD DNS domain, for example corp.example.com."
   }
 }
+variable "override_dns" {
+  type        = bool
+  default     = false
+  description = "Set custom DNS on the primary Windows interface before joining AD; otherwise retain subnet/DHCP DNS."
+}
 variable "ad_dns_servers" {
   type        = string
-  description = "Comma-separated IPv4 addresses of AD DNS resolvers."
+  default     = ""
+  description = "Comma-separated DNS server IPv4 addresses, required when override_dns is enabled."
   validation {
-    condition     = length(split(",", var.ad_dns_servers)) >= 1 && alltrue([for ip in split(",", var.ad_dns_servers) : can(cidrnetmask("${trimspace(ip)}/32"))])
+    condition     = trimspace(var.ad_dns_servers) == "" || alltrue([for ip in split(",", var.ad_dns_servers) : can(cidrnetmask("${trimspace(ip)}/32"))])
     error_message = "Enter one or more AD DNS IPv4 addresses, separated by commas."
   }
 }
