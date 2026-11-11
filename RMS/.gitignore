@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!terraform.tfvars.example
+crash.log
+__pycache__/
+dist/*.zip
+!dist/oci-windows-ad-stack.zip

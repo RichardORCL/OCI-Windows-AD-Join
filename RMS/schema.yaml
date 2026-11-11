@@ -1,0 +1,168 @@
+title: Windows Server — join existing Active Directory
+description: Launch a Windows VM in an existing network and join AD using credentials retrieved directly from OCI Vault by the instance.
+schemaVersion: 1.1.0
+version: "1.0.0"
+locale: en
+variableGroups:
+  - title: Hidden
+    visible: false
+    variables: [tenancy_ocid]
+  - title: Placement
+    variables: [compartment_ocid, region, availability_domain]
+  - title: Server
+    variables: [instance_name, computer_name, windows_server_version, shape, ocpus, memory_in_gbs, boot_volume_size_in_gbs, image_ocid]
+  - title: Existing network
+    variables: [network_compartment_ocid, vcn_ocid, subnet_ocid, nsg_ocids, private_ip, assign_public_ip]
+  - title: Active Directory
+    variables: [ad_domain_name, ad_dns_servers, ad_ou_path]
+  - title: Join credentials in OCI Vault
+    variables: [secret_compartment_ocid, ad_credentials_secret_ocid, create_iam_resources]
+variables:
+  tenancy_ocid:
+    type: string
+    visible: false
+  compartment_ocid:
+    type: oci:identity:compartment:id
+    title: Instance compartment
+    required: true
+  region:
+    type: oci:identity:region:name
+    title: Region
+    required: true
+  availability_domain:
+    type: oci:identity:availabilitydomain:name
+    title: Availability domain
+    required: true
+    dependsOn:
+      compartmentId: ${compartment_ocid}
+  instance_name:
+    type: string
+    title: Instance display name
+    required: true
+    default: windows-ad-member
+  computer_name:
+    type: string
+    title: Windows computer name
+    description: Unique in AD; 1–15 characters. Letters, numbers and internal hyphens only; not all numeric.
+    required: true
+    default: OCI-WIN01
+    minLength: 1
+    maxLength: 15
+  windows_server_version:
+    type: enum
+    title: Windows Server version
+    description: Latest compatible Standard Edition VM platform image. Availability varies by shape and region.
+    required: true
+    default: "2022"
+    enum: ["2019", "2022", "2025"]
+  shape:
+    type: oci:core:instanceshape:name
+    title: Shape
+    description: x86 Standard Flex VM shapes; image compatibility and capacity are checked during deployment.
+    required: true
+    default: VM.Standard.E4.Flex
+    pattern: '^VM\.Standard\.(E[3-9]|[3-9]|Intel[3-9])\.Flex$'
+    dependsOn:
+      compartmentId: ${compartment_ocid}
+      availabilityDomain: ${availability_domain}
+  ocpus:
+    type: integer
+    title: OCPUs
+    default: 2
+    minimum: 1
+    maximum: 64
+    required: true
+  memory_in_gbs:
+    type: integer
+    title: Memory (GiB)
+    default: 16
+    minimum: 8
+    maximum: 1024
+    required: true
+  boot_volume_size_in_gbs:
+    type: integer
+    title: Boot volume size (GiB)
+    default: 100
+    minimum: 100
+    maximum: 32768
+    required: true
+  image_ocid:
+    type: oci:core:image:id
+    title: Optional image override
+    description: Leave empty for automatic selection. For an override choose an unjoined Windows image of the selected version with Cloudbase-Init and Python/pip.
+    required: false
+    dependsOn:
+      compartmentId: ${compartment_ocid}
+      operatingSystem: Windows
+      shape: ${shape}
+  network_compartment_ocid:
+    type: oci:identity:compartment:id
+    title: Network compartment
+    required: true
+  vcn_ocid:
+    type: oci:core:vcn:id
+    title: Virtual cloud network
+    required: true
+    dependsOn:
+      compartmentId: ${network_compartment_ocid}
+  subnet_ocid:
+    type: oci:core:subnet:id
+    title: Subnet
+    description: Must have connectivity to AD, AD DNS, OCI authentication/Secrets APIs and PyPI (unless SDK is preinstalled).
+    required: true
+    dependsOn:
+      compartmentId: ${network_compartment_ocid}
+      vcnId: ${vcn_ocid}
+  nsg_ocids:
+    type: array
+    title: Network security groups (optional)
+    required: false
+    default: []
+    maxItems: 5
+    uniqueItems: true
+    items:
+      type: oci:core:nsg:id
+      dependsOn:
+        compartmentId: ${network_compartment_ocid}
+        vcnId: ${vcn_ocid}
+  private_ip:
+    type: string
+    title: Optional private IPv4 address
+    description: Leave empty for automatic allocation from the subnet.
+    required: false
+  assign_public_ip:
+    type: boolean
+    title: Assign a public IPv4 address
+    description: Requires a public subnet. Default is private access through your existing VPN or bastion.
+    default: false
+  ad_domain_name:
+    type: string
+    title: Existing AD DNS domain
+    description: For example corp.example.com
+    required: true
+  ad_dns_servers:
+    type: string
+    title: AD DNS server IPv4 addresses
+    description: Comma-separated, for example 10.0.0.10,10.0.0.11. These resolvers must also resolve public/OCI names.
+    required: true
+  ad_ou_path:
+    type: string
+    title: Computer OU distinguished name (optional)
+    description: For example OU=Servers,DC=corp,DC=example,DC=com. Empty uses the domain default computer container.
+    required: false
+  secret_compartment_ocid:
+    type: oci:identity:compartment:id
+    title: Secret compartment
+    required: true
+  ad_credentials_secret_ocid:
+    type: oci:kms:secret:id
+    title: AD join credential secret
+    description: Select a secret in this region containing JSON with username and password. Only its OCID enters Terraform. See README for the exact format.
+    required: true
+    dependsOn:
+      compartmentId: ${secret_compartment_ocid}
+  create_iam_resources:
+    type: boolean
+    title: Create instance-specific Vault access
+    description: Requires permission to manage dynamic groups and policies in the tenancy. Disable only if an administrator has preconfigured access.
+    default: true

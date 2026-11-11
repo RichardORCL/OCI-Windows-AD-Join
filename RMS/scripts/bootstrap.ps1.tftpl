@@ -1,0 +1,18 @@
+#ps1_sysnative
+$ErrorActionPreference = 'Stop'
+$root = Join-Path $env:ProgramData 'OCI-ADJoin'
+New-Item -ItemType Directory -Path $root -Force | Out-Null
+# Remove inherited access before writing any files executed as SYSTEM.
+& icacls.exe $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot secure bootstrap directory.' }
+[IO.File]::WriteAllBytes((Join-Path $root 'config.json'), [Convert]::FromBase64String('${config_base64}'))
+[IO.File]::WriteAllBytes((Join-Path $root 'join-domain.ps1'), [Convert]::FromBase64String('${worker_base64}'))
+[IO.File]::WriteAllBytes((Join-Path $root 'read_secret.py'), [Convert]::FromBase64String('${helper_base64}'))
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $root + '\join-domain.ps1"')
+$timer = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)
+$startup = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName 'OCI-ADJoin' -Action $action -Trigger @($timer, $startup) -Principal $principal -Settings $settings -Force | Out-Null
+# Cloudbase-Init must finish before a separate process attempts the join/reboot.
+@{ state = 'scheduled'; updated_utc = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $root 'status.json') -Encoding UTF8
