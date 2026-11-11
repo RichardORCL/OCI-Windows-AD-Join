@@ -5,6 +5,7 @@ $stateFile = Join-Path $root 'progress.json'
 $taskName = 'OCI-ADJoin'
 . (Join-Path $root 'stage_logging.ps1')
 Initialize-StageLogging -Root $root
+. (Join-Path $root 'configuration.ps1')
 
 function Stop-JoinTask {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -91,6 +92,12 @@ try {
     Set-Stage 'cloudbase-init'
     if (-not (Wait-CloudbaseInit)) { exit 0 }
 
+    if ($config.manual_metadata) {
+        Set-Stage 'metadata-configuration'
+        $config = Resolve-ManualConfiguration $config
+        $config | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $root 'config.json') -Encoding UTF8
+    }
+
     Set-Stage 'instance-inspection'
     $computer = Get-CimInstance Win32_ComputerSystem
     $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
@@ -136,15 +143,10 @@ try {
         exit 0
     }
 
-    Set-Stage 'dns'
-    if ($config.override_dns) {
-        if (@($config.dns_servers).Count -eq 0) { throw 'DNS override requires at least one server' }
-        $nic = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
-        if (-not $nic) { throw 'No primary network interface' }
-        Set-DnsClientServerAddress -InterfaceIndex $nic.InterfaceIndex -ServerAddresses @($config.dns_servers)
-        Clear-DnsClientCache
+    if (-not $config.config_from_vault) {
+        Set-Stage 'dns'
+        Set-DomainDns $config
     }
-    Resolve-DnsName -Name ('_ldap._tcp.dc._msdcs.' + $config.domain) -Type SRV -DnsOnly -ErrorAction Stop | Out-Null
 
     Set-Stage 'sdk-install'
     $python = Initialize-OciSdk
@@ -154,6 +156,13 @@ try {
     $secretJson = & $python (Join-Path $root 'read_secret.py') 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'Vault retrieval unavailable' }
     $secret = $secretJson | ConvertFrom-Json
+    if ($config.config_from_vault) {
+        Set-Stage 'vault-configuration'
+        $config = Resolve-VaultConfiguration $config $secret.ad_join
+        $config | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $root 'config.json') -Encoding UTF8
+        Set-Stage 'dns'
+        Set-DomainDns $config
+    }
     $securePassword = ConvertTo-SecureString -String $secret.password -AsPlainText -Force
     $credential = New-Object System.Management.Automation.PSCredential($secret.username, $securePassword)
     $secretJson = $null

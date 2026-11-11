@@ -26,6 +26,7 @@ Write-BootstrapFile 'join-domain.ps1' '${worker_base64}'
 Write-BootstrapFile 'read_secret.py' '${helper_base64}'
 Write-BootstrapFile 'cleanup_access.py' '${cleanup_base64}'
 Write-BootstrapFile 'stage_logging.ps1' '${logging_base64}'
+Write-BootstrapFile 'configuration.ps1' '${configuration_base64}'
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $root + '\join-domain.ps1"')
 $firstRun = (Get-Date).AddSeconds(30)
 $timer = New-ScheduledTaskTrigger -Once -At $firstRun -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 1)

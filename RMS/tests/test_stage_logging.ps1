@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $source = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts'
-foreach ($path in @('stage_logging.ps1', 'join-domain.ps1', 'bootstrap.ps1.tftpl')) {
+foreach ($path in @('stage_logging.ps1', 'join-domain.ps1', 'configuration.ps1', 'bootstrap.ps1.tftpl')) {
     $tokens = $null
     $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $source $path), [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -86,6 +86,7 @@ try {
     $workerRoot = Join-Path $workerParent 'OCI-ADJoin'
     New-Item -ItemType Directory $workerRoot -Force | Out-Null
     Copy-Item (Join-Path $source 'stage_logging.ps1') $workerRoot
+    Copy-Item (Join-Path $source 'configuration.ps1') $workerRoot
     'FAKE_SENSITIVE_VALUE_INVALID_CONFIG' | Set-Content (Join-Path $workerRoot 'config.json') -Encoding UTF8
     $workerPath = (Join-Path $source 'join-domain.ps1').Replace("'", "''")
     $safeWorkerParent = $workerParent.Replace("'", "''")

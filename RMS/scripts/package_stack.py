@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FILES = [
     "versions.tf", "variables.tf", "main.tf", "outputs.tf", "schema.yaml",
     ".terraform.lock.hcl", "README.md", "terraform.tfvars.example",
-    "scripts/bootstrap.ps1.tftpl", "scripts/join-domain.ps1", "scripts/read_secret.py", "scripts/cleanup_access.py", "scripts/stage_logging.ps1",
+    "scripts/bootstrap.ps1.tftpl", "scripts/join-domain.ps1", "scripts/read_secret.py", "scripts/cleanup_access.py", "scripts/stage_logging.ps1", "scripts/configuration.ps1",
 ]
 
 

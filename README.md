@@ -2,6 +2,14 @@
 
 Launch Windows Server on Oracle Cloud Infrastructure and join an existing Active Directory domain using temporary OCI Vault access. Deploy shared IAM once, then reuse it for each new server.
 
+Two deployment models are available: the Resource Manager stacks below, and a separate [manual-cloud-init/](manual-cloud-init/README.md) model for normal OCI instance creation with an attached script.
+
+## Manual instance launch
+
+Download the [self-contained Windows Cloudbase-Init script](https://github.com/RichardORCL/OCI-Windows-AD-Join/raw/refs/heads/main/manual-cloud-init/oci-windows-ad-cloud-init.ps1). After preparing shared IAM, apply the bootstrap tag when creating the instance and attach the script as its initialization script. Configure the secret OCID, AD domain and optional DNS override through nonsecret script settings or metadata; AD/DNS settings can also come from the credential secret's `ad_join` object. Credentials stay in Vault.
+
+See the [manual-launch guide and examples](manual-cloud-init/README.md). This model needs no Resource Manager **server** stack and lives entirely in its own folder; its generated script embeds the shared runtime.
+
 ## 1. Create shared IAM once
 
 [![Deploy IAM to Oracle Cloud](https://oci-resourcemanager-plugin.plugins.oci.oraclecloud.com/latest/deploy-to-oracle-cloud.svg)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/RichardORCL/OCI-Windows-AD-Join/raw/refs/heads/main/RMS/dist/oci-windows-ad-iam-stack.zip)
@@ -63,22 +71,26 @@ Final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Fa
 
 | Path | Contents |
 | --- | --- |
+| [`manual-cloud-init/`](manual-cloud-init/) | Self-contained manual-launch script, examples, builder and tests |
 | [`RMS/iam/`](RMS/iam/) | Shared IAM stack, YAML form and offline tests |
 | [`RMS/`](RMS/) | Server Terraform stack and YAML form |
 | [`RMS/scripts/`](RMS/scripts/) | Windows bootstrap, Vault reader, access cleanup and packaging |
 | [`RMS/tests/`](RMS/tests/) | Server plans and Python credential/cleanup/package tests |
 | [`RMS/dist/`](RMS/dist/) | Separate upload-ready IAM and server ZIPs used by the buttons |
 
-Rebuild both deployment archives after source changes, and commit them with the sources:
+Rebuild both deployment archives and the manual script after shared source changes, and commit them with the sources:
 
 ```sh
 python3 RMS/scripts/package_stack.py
+python3 manual-cloud-init/build.py
 terraform -chdir=RMS init
 terraform -chdir=RMS test
 terraform -chdir=RMS/iam init
 terraform -chdir=RMS/iam test
 python3 -m unittest discover -s RMS/tests -p 'test_*.py'
+python3 -m unittest discover -s manual-cloud-init/tests -p 'test_*.py'
 pwsh -NoProfile -File RMS/tests/test_stage_logging.ps1
+pwsh -NoProfile -File manual-cloud-init/tests/test_configuration.ps1
 ```
 
 Deployment requires Terraform >=1.2; mocked plan tests require >=1.7. Offline tests create no OCI resources. Both forms are checked against Oracle's published Resource Manager schema. Live Windows boot, policy enforcement and revocation timing still need validation in your tenancy.

@@ -1,6 +1,6 @@
 # Reusable IAM stack for Windows AD enrollment
 
-Deploy this stack **once**, before creating any server stacks. It creates a defined-tag namespace/key, one reusable dynamic group, and a policy. It creates no Compute instance and never reads the credential secret's contents.
+Deploy this stack **once**, before creating any server stacks or [manual Cloudbase-Init instances](../../manual-cloud-init/README.md). It creates a defined-tag namespace/key, one reusable dynamic group, and a policy. It creates no Compute instance and never reads the credential secret's contents.
 
 Upload `oci-windows-ad-iam-stack.zip` to OCI Resource Manager, or use the IAM deployment button in the repository README. Select the **allowed server compartment** and the existing Vault secret. Copy the `server_stack_settings` output to each server stack. Defaults are `ADJoinBootstrap.State=pending`. Namespace/key/value must match exactly in both stacks. Allow IAM propagation before launching servers; membership changes can take about an hour.
 

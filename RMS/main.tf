@@ -33,11 +33,12 @@ locals {
     tag_value     = var.bootstrap_tag_value
   }
   user_data = templatefile("${path.module}/scripts/bootstrap.ps1.tftpl", {
-    config_base64  = base64encode(jsonencode(local.bootstrap_config))
-    worker_base64  = base64gzip(file("${path.module}/scripts/join-domain.ps1"))
-    helper_base64  = base64gzip(file("${path.module}/scripts/read_secret.py"))
-    cleanup_base64 = base64gzip(file("${path.module}/scripts/cleanup_access.py"))
-    logging_base64 = base64gzip(file("${path.module}/scripts/stage_logging.ps1"))
+    config_base64        = base64encode(jsonencode(local.bootstrap_config))
+    worker_base64        = base64gzip(file("${path.module}/scripts/join-domain.ps1"))
+    helper_base64        = base64gzip(file("${path.module}/scripts/read_secret.py"))
+    cleanup_base64       = base64gzip(file("${path.module}/scripts/cleanup_access.py"))
+    logging_base64       = base64gzip(file("${path.module}/scripts/stage_logging.ps1"))
+    configuration_base64 = base64gzip(file("${path.module}/scripts/configuration.ps1"))
   })
 }
 

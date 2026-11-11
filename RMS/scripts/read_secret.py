@@ -30,7 +30,12 @@ def main():
         if not isinstance(credentials.get(key), str) or not credentials[key]:
             raise ValueError("Invalid credential structure")
     # ASCII JSON avoids Windows code-page corruption of non-ASCII passwords.
-    sys.stdout.write(json.dumps({k: credentials[k] for k in ("username", "password")}, ensure_ascii=True))
+    result = {k: credentials[k] for k in ("username", "password")}
+    if config.get("config_from_vault"):
+        if not isinstance(credentials.get("ad_join"), dict):
+            raise ValueError("An ad_join configuration object is required")
+        result["ad_join"] = credentials["ad_join"]
+    sys.stdout.write(json.dumps(result, ensure_ascii=True))
 
 
 if __name__ == "__main__":

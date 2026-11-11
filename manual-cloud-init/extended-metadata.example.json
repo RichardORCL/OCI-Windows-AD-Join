@@ -1,0 +1,10 @@
+{
+  "ad_join_config": {
+    "secret_id": "ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE",
+    "domain": "corp.example.com",
+    "computer_name": "OCI-WIN01",
+    "override_dns": true,
+    "dns_servers": ["10.0.0.10", "10.0.0.11"],
+    "ou_path": "OU=Servers,DC=corp,DC=example,DC=com"
+  }
+}

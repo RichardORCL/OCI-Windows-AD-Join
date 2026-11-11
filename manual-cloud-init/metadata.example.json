@@ -1,0 +1,3 @@
+{
+  "ad_join_config": "{\"secret_id\":\"ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE\",\"computer_name\":\"OCI-WIN01\",\"config_from_vault\":true}"
+}

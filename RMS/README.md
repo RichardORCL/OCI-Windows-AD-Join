@@ -1,5 +1,7 @@
 # OCI Windows Server with Active Directory join
 
+For an ordinary OCI instance launch with an attached script instead of a server stack, use the separate [manual-cloud-init model](../manual-cloud-init/README.md).
+
 First deploy the separate reusable IAM stack described in `iam/README.md`, then upload `dist/oci-windows-ad-stack.zip` to **OCI Console → Developer Services → Resource Manager → Stacks → Create stack → My configuration → .zip file**. The archive has Terraform and `schema.yaml` at its root. Select the deployment region, complete the form, review a Plan, then Apply. No resources have been deployed by creating this project.
 
 The form provides Windows Server **2019 / 2022 / 2025**, an OCI shape dropdown filtered to x86 Standard Flex VMs, OCPUs, memory, boot volume, compartment, availability domain, existing VCN/subnet, optional NSGs and private IP, AD DNS/domain/OU, and a Vault secret picker. Defaults are 2 OCPUs, 16 GiB RAM, a 100 GiB boot disk and no public IP. Supported shapes, image availability, capacity and shape-specific sizing limits still depend on your region. Windows licensing is charged by OCI in addition to Compute.

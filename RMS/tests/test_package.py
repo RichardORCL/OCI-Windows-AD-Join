@@ -21,6 +21,7 @@ class PackageTest(unittest.TestCase):
                 self.assertIn("scripts/read_secret.py", names)
                 self.assertIn("scripts/cleanup_access.py", names)
                 self.assertIn("scripts/stage_logging.ps1", names)
+                self.assertIn("scripts/configuration.ps1", names)
                 self.assertNotIn('resource "oci_identity_dynamic_group"', archive.read("main.tf").decode())
                 self.assertNotIn('resource "oci_identity_policy"', archive.read("main.tf").decode())
                 self.assertFalse(any(name.startswith("iam/") for name in names))
