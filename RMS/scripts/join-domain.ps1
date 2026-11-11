@@ -2,35 +2,10 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = Join-Path $env:ProgramData 'OCI-ADJoin'
 $stateFile = Join-Path $root 'progress.json'
-$statusFile = Join-Path $root 'status.json'
-$logFile = Join-Path $root 'worker.log'
 $taskName = 'OCI-ADJoin'
+. (Join-Path $root 'stage_logging.ps1')
+Initialize-StageLogging -Root $root
 
-function Write-Status([string]$State, [string]$Stage) {
-    $now = [DateTime]::UtcNow.ToString('o')
-    @{ state = $State; stage = $Stage; updated_utc = $now } |
-        ConvertTo-Json | Set-Content $statusFile -Encoding UTF8
-    # Only fixed state/stage labels are logged, never command output or credentials.
-    Add-Content $logFile -Value "$now state=$State stage=$Stage" -Encoding UTF8
-}
-function Set-Stage([string]$Stage) {
-    $script:stage = $Stage
-    Write-Status 'running' $Stage
-}
-function Write-FailureCode($Failure) {
-    # Exception messages/records may contain arguments. Log types and numeric codes only.
-    $exception = $Failure.Exception
-    $depth = 0
-    while ($exception -and $depth -lt 5) {
-        $typeName = $exception.GetType().FullName
-        $code = $exception.HResult
-        $native = ''
-        if ($exception -is [System.ComponentModel.Win32Exception]) { $native = $exception.NativeErrorCode }
-        Add-Content $logFile -Value "$([DateTime]::UtcNow.ToString('o')) stage=$script:stage exception_type=$typeName hresult=$code native_error=$native" -Encoding UTF8
-        $exception = $exception.InnerException
-        $depth++
-    }
-}
 function Stop-JoinTask {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
@@ -48,11 +23,13 @@ function Initialize-OciSdk {
     if (-not $python) { throw 'Cloudbase-Init Python runtime missing' }
     $sdk = Join-Path $root 'sdk'
     $ready = Join-Path $sdk '.ready-2.191.0'
-    if (-not (Test-Path $ready)) {
+    $sdkReady = Test-Path $ready
+    Write-TimingEvent 'sdk_configuration' @{ stage = 'sdk-install'; sdk_version = '2.191.0'; no_compile = $true; cache_hit = $sdkReady }
+    if (-not $sdkReady) {
         & $python -m pip --version *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Bundled Python must include pip; use a prepared image as documented' }
         $pipLog = Join-Path $root 'sdk-install.log'
-        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --log $pipLog --target $sdk 'oci==2.191.0' *> $null
+        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --no-compile --upgrade --log $pipLog --target $sdk 'oci==2.191.0' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'OCI SDK install failed' }
         New-Item -ItemType File -Path $ready -Force | Out-Null
     }
@@ -101,6 +78,7 @@ try {
     $computer = Get-CimInstance Win32_ComputerSystem
     $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
     if ($progress.pending_boot -eq $boot) {
+        Set-Stage 'reboot-scheduling'
         Write-Status 'joined_pending_reboot' 'reboot'
         & shutdown.exe /r /t 60 /d p:2:4 /c 'Complete OCI Active Directory join'
         exit 0
@@ -134,6 +112,7 @@ try {
             exit 0
         }
         if ($probeResult -ne 0) { throw 'Vault access denial could not be verified' }
+        Set-Stage 'task-cleanup'
         Write-Status 'complete' 'domain-verified-tag-removed-vault-denied'
         Stop-JoinTask
         exit 0
@@ -176,6 +155,7 @@ try {
     $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
     $progress.pending_boot = $boot
     Save-Progress
+    Set-Stage 'reboot-scheduling'
     Write-Status 'joined_pending_reboot' 'reboot'
     & shutdown.exe /r /t 60 /d p:2:4 /c 'Complete OCI Active Directory join'
 } catch {
@@ -194,4 +174,5 @@ try {
     $secret = $null
     $credential = $null
     if ($securePassword) { $securePassword.Dispose() }
+    Complete-RunTiming
 }

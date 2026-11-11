@@ -34,9 +34,10 @@ locals {
   }
   user_data = templatefile("${path.module}/scripts/bootstrap.ps1.tftpl", {
     config_base64  = base64encode(jsonencode(local.bootstrap_config))
-    worker_base64  = filebase64("${path.module}/scripts/join-domain.ps1")
-    helper_base64  = filebase64("${path.module}/scripts/read_secret.py")
-    cleanup_base64 = filebase64("${path.module}/scripts/cleanup_access.py")
+    worker_base64  = base64gzip(file("${path.module}/scripts/join-domain.ps1"))
+    helper_base64  = base64gzip(file("${path.module}/scripts/read_secret.py"))
+    cleanup_base64 = base64gzip(file("${path.module}/scripts/cleanup_access.py"))
+    logging_base64 = base64gzip(file("${path.module}/scripts/stage_logging.ps1"))
   })
 }
 
@@ -83,8 +84,8 @@ resource "oci_core_instance" "windows" {
       error_message = "No compatible Windows Standard Edition VM platform image found for this version/shape/region. Choose another combination or supply an image override."
     }
     precondition {
-      condition     = length(local.user_data) <= 32000
-      error_message = "Bootstrap exceeds the OCI user-data size limit; reduce embedded scripts."
+      condition     = length(jsonencode({ user_data = base64encode(local.user_data) })) <= 32000
+      error_message = "Encoded bootstrap metadata exceeds the OCI 32,000-byte limit; reduce embedded scripts."
     }
   }
 }

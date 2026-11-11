@@ -53,7 +53,7 @@ Get-CimInstance Win32_ComputerSystem | Select-Object Name, Domain, PartOfDomain
 Test-ComputerSecureChannel
 ```
 
-`worker.log` records stage transitions and numeric error codes; `sdk-install.log` records pip diagnostics. Existing VMs require an explicit script update to gain this logging.
+`worker.log` records stage durations and numeric error codes; `sdk-install.log` records pip diagnostics. `timings.jsonl` provides UTC stage start/end times, elapsed milliseconds, outcomes and per-invocation run IDs for analysis. SDK installs use `--no-compile` and record whether the SDK was already cached. Existing VMs require an explicit script update to gain this logging.
 
 Final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Failures during tag removal or revocation checking remain incomplete and require attention. Delete/terminate failed enrollment instances or remove their bootstrap tags administratively. Keep shared IAM until no further server deployments need it.
 
@@ -76,6 +76,7 @@ terraform -chdir=RMS test
 terraform -chdir=RMS/iam init
 terraform -chdir=RMS/iam test
 python3 -m unittest discover -s RMS/tests -p 'test_*.py'
+pwsh -NoProfile -File RMS/tests/test_stage_logging.ps1
 ```
 
 Deployment requires Terraform >=1.2; mocked plan tests require >=1.7. Offline tests create no OCI resources. Both forms are checked against Oracle's published Resource Manager schema. Live Windows boot, policy enforcement and revocation timing still need validation in your tenancy.
