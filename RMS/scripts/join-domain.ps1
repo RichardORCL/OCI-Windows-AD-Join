@@ -1,14 +1,35 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = Join-Path $env:ProgramData 'OCI-ADJoin'
-$config = Get-Content (Join-Path $root 'config.json') -Raw | ConvertFrom-Json
 $stateFile = Join-Path $root 'progress.json'
 $statusFile = Join-Path $root 'status.json'
+$logFile = Join-Path $root 'worker.log'
 $taskName = 'OCI-ADJoin'
 
 function Write-Status([string]$State, [string]$Stage) {
-    @{ state = $State; stage = $Stage; updated_utc = [DateTime]::UtcNow.ToString('o') } |
+    $now = [DateTime]::UtcNow.ToString('o')
+    @{ state = $State; stage = $Stage; updated_utc = $now } |
         ConvertTo-Json | Set-Content $statusFile -Encoding UTF8
+    # Only fixed state/stage labels are logged, never command output or credentials.
+    Add-Content $logFile -Value "$now state=$State stage=$Stage" -Encoding UTF8
+}
+function Set-Stage([string]$Stage) {
+    $script:stage = $Stage
+    Write-Status 'running' $Stage
+}
+function Write-FailureCode($Failure) {
+    # Exception messages/records may contain arguments. Log types and numeric codes only.
+    $exception = $Failure.Exception
+    $depth = 0
+    while ($exception -and $depth -lt 5) {
+        $typeName = $exception.GetType().FullName
+        $code = $exception.HResult
+        $native = ''
+        if ($exception -is [System.ComponentModel.Win32Exception]) { $native = $exception.NativeErrorCode }
+        Add-Content $logFile -Value "$([DateTime]::UtcNow.ToString('o')) stage=$script:stage exception_type=$typeName hresult=$code native_error=$native" -Encoding UTF8
+        $exception = $exception.InnerException
+        $depth++
+    }
 }
 function Stop-JoinTask {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -30,7 +51,8 @@ function Initialize-OciSdk {
     if (-not (Test-Path $ready)) {
         & $python -m pip --version *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Bundled Python must include pip; use a prepared image as documented' }
-        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --target $sdk 'oci==2.191.0' *> $null
+        $pipLog = Join-Path $root 'sdk-install.log'
+        & $python -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --log $pipLog --target $sdk 'oci==2.191.0' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'OCI SDK install failed' }
         New-Item -ItemType File -Path $ready -Force | Out-Null
     }
@@ -40,6 +62,8 @@ function Initialize-OciSdk {
 
 $stage = 'initialization'
 try {
+    Set-Stage 'initialization'
+    $config = Get-Content (Join-Path $root 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if (Test-Path $stateFile) {
         $script:progress = Get-Content $stateFile -Raw | ConvertFrom-Json
     } else {
@@ -66,12 +90,14 @@ try {
     Save-Progress
 
     # Never reboot while the cloud initialization service is still executing.
+    Set-Stage 'cloudbase-init'
     $cloudbase = Get-Service -Name 'cloudbase-init*' -ErrorAction SilentlyContinue
     if (@($cloudbase | Where-Object { $_.Status -eq 'Running' }).Count -gt 0) {
         Write-Status 'waiting' 'cloudbase-init'
         exit 0
     }
 
+    Set-Stage 'instance-inspection'
     $computer = Get-CimInstance Win32_ComputerSystem
     $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
     if ($progress.pending_boot -eq $boot) {
@@ -85,22 +111,22 @@ try {
             Stop-JoinTask
             exit 1
         }
-        $stage = 'secure-channel-verification'
+        Set-Stage 'secure-channel-verification'
         if (-not (Test-ComputerSecureChannel -ErrorAction Stop)) { throw 'Secure channel unavailable' }
         if (-not $progress.cleanup_deadline) {
             $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
             Save-Progress
         }
-        $stage = 'sdk-install'
+        Set-Stage 'sdk-install'
         $python = Initialize-OciSdk
         if (-not $progress.tag_removed) {
-            $stage = 'bootstrap-tag-removal'
+            Set-Stage 'bootstrap-tag-removal'
             & $python (Join-Path $root 'cleanup_access.py') 'remove-tag' *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Bootstrap tag removal failed' }
             $progress.tag_removed = $true
             Save-Progress
         }
-        $stage = 'vault-revocation'
+        Set-Stage 'vault-revocation'
         & $python (Join-Path $root 'cleanup_access.py') 'verify-revocation' *> $null
         $probeResult = $LASTEXITCODE
         if ($probeResult -eq 10) {
@@ -113,7 +139,7 @@ try {
         exit 0
     }
 
-    $stage = 'dns'
+    Set-Stage 'dns'
     if ($config.override_dns) {
         if (@($config.dns_servers).Count -eq 0) { throw 'DNS override requires at least one server' }
         $nic = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
@@ -123,10 +149,10 @@ try {
     }
     Resolve-DnsName -Name ('_ldap._tcp.dc._msdcs.' + $config.domain) -Type SRV -DnsOnly -ErrorAction Stop | Out-Null
 
-    $stage = 'sdk-install'
+    Set-Stage 'sdk-install'
     $python = Initialize-OciSdk
 
-    $stage = 'vault-retrieval'
+    Set-Stage 'vault-retrieval'
     # Never run this helper interactively or redirect its stdout to a file.
     $secretJson = & $python (Join-Path $root 'read_secret.py') 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'Vault retrieval unavailable' }
@@ -136,7 +162,7 @@ try {
     $secretJson = $null
     $secret = $null
 
-    $stage = 'domain-join'
+    Set-Stage 'domain-join'
     $join = @{
         DomainName = $config.domain
         Credential = $credential
@@ -153,6 +179,7 @@ try {
     Write-Status 'joined_pending_reboot' 'reboot'
     & shutdown.exe /r /t 60 /d p:2:4 /c 'Complete OCI Active Directory join'
 } catch {
+    Write-FailureCode $_
     # Intentionally omit exception messages, invocation details and transcripts.
     if ($stage -eq 'domain-join') {
         # Do not repeatedly submit a potentially invalid password and lock the account.

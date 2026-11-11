@@ -64,12 +64,16 @@ If an existing stack fails with `Missing expression` for `var.nsg_ocids`, edit t
 
 ```powershell
 Get-Content C:\ProgramData\OCI-ADJoin\status.json
+Get-Content C:\ProgramData\OCI-ADJoin\worker.log -Tail 50
+Get-Content C:\ProgramData\OCI-ADJoin\sdk-install.log -Tail 50 -ErrorAction SilentlyContinue
 Get-CimInstance Win32_ComputerSystem | Select-Object Name, Domain, PartOfDomain
 Test-ComputerSecureChannel
 Get-ScheduledTask -TaskName OCI-ADJoin -ErrorAction SilentlyContinue
 ```
 
-Expected final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Intermediate states include `scheduled`, `waiting`, `retrying`, `joined_pending_reboot` and `revocation_pending`. A `bootstrap-tag-removal` or `vault-revocation` retry means access cleanup is unfinished. Status stages distinguish DNS, SDK installation, Vault retrieval, join and secure-channel verification. For diagnosis inspect Task Scheduler history, Cloudbase-Init logs and `C:\Windows\debug\NetSetup.log` locally; do not enable credential/request dumps. Do not manually run `read_secret.py`: its stdout is deliberately consumed only by the parent process.
+Expected final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Intermediate states include `running` (with the current stage), `scheduled`, `waiting`, `retrying`, `joined_pending_reboot` and `revocation_pending`. A `bootstrap-tag-removal` or `vault-revocation` retry means access cleanup is unfinished. Status updates at the start of each stage. `worker.log` appends UTC stage transitions plus exception type/HRESULT/native error codes, without raw exception messages or credentials. `sdk-install.log` contains pip installation diagnostics only; Vault helper output is never routed there. If the first install is slow, check this file and the Python process; the SDK marker is created only after installation succeeds. Both logs reside in the Administrators/SYSTEM-only bootstrap directory. For diagnosis inspect Task Scheduler history, Cloudbase-Init logs and `C:\Windows\debug\NetSetup.log` locally; do not enable credential/request dumps. Do not manually run `read_secret.py`: its stdout is deliberately consumed only by the parent process.
+
+Existing VMs keep their installed script until explicitly updated; a GitHub/ZIP update alone does not add these logs to an already-running VM.
 
 After fixing a failed prerequisite, use an elevated PowerShell session to start a fresh retry window. If the task was removed, re-register it:
 

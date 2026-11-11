@@ -48,9 +48,12 @@ A successful Terraform Apply confirms infrastructure provisioning. Inspect the g
 
 ```powershell
 Get-Content C:\ProgramData\OCI-ADJoin\status.json
+Get-Content C:\ProgramData\OCI-ADJoin\worker.log -Tail 50
 Get-CimInstance Win32_ComputerSystem | Select-Object Name, Domain, PartOfDomain
 Test-ComputerSecureChannel
 ```
+
+`worker.log` records stage transitions and numeric error codes; `sdk-install.log` records pip diagnostics. Existing VMs require an explicit script update to gain this logging.
 
 Final status is `complete`, stage `domain-verified-tag-removed-vault-denied`. Failures during tag removal or revocation checking remain incomplete and require attention. Delete/terminate failed enrollment instances or remove their bootstrap tags administratively. Keep shared IAM until no further server deployments need it.
 
