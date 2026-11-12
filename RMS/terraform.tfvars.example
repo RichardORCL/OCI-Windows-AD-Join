@@ -5,10 +5,6 @@ availability_domain       = "REPLACE:EU-AMSTERDAM-1-AD-1"
 network_compartment_ocid  = "ocid1.compartment.oc1..REPLACE"
 vcn_ocid                  = "ocid1.vcn.oc1.eu-amsterdam-1.REPLACE"
 subnet_ocid               = "ocid1.subnet.oc1.eu-amsterdam-1.REPLACE"
-ad_domain_name           = "corp.example.com"
-override_dns             = true
-ad_dns_servers           = "10.0.0.10,10.0.0.11"
-ad_ou_path                = "OU=Servers,DC=corp,DC=example,DC=com"
 secret_compartment_ocid   = "ocid1.compartment.oc1..REPLACE"
 ad_credentials_secret_ocid = "ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE"
 # Must match the separately deployed IAM stack.

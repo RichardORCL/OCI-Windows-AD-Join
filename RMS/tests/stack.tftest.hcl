@@ -11,8 +11,6 @@ variables {
   network_compartment_ocid   = "ocid1.compartment.oc1..network"
   vcn_ocid                   = "ocid1.vcn.oc1.eu-amsterdam-1.test"
   subnet_ocid                = "ocid1.subnet.oc1.eu-amsterdam-1.test"
-  ad_domain_name             = "corp.example.com"
-  ad_dns_servers             = "10.0.0.10, 10.0.0.11"
   secret_compartment_ocid    = "ocid1.compartment.oc1..secrets"
   ad_credentials_secret_ocid = "ocid1.vaultsecret.oc1.eu-amsterdam-1.test"
 }
@@ -65,42 +63,12 @@ run "reject_bad_computer_name" {
   expect_failures = [var.computer_name]
 }
 
-run "retain_existing_dns" {
+run "domain_configuration_only_in_vault" {
   command = plan
-  variables {
-    ad_dns_servers = ""
-  }
   assert {
-    condition     = !local.bootstrap_config.override_dns && length(local.bootstrap_config.dns_servers) == 0
-    error_message = "By default the guest must retain its existing DNS configuration."
+    condition     = local.bootstrap_config.config_from_vault && !contains(keys(local.bootstrap_config), "domain") && !contains(keys(local.bootstrap_config), "dns_servers") && !contains(keys(local.bootstrap_config), "ou_path")
+    error_message = "Domain settings must be retrieved by the guest from Vault, never supplied through Terraform metadata."
   }
-}
-run "custom_dns_before_join" {
-  command = plan
-  variables {
-    override_dns   = true
-    ad_dns_servers = "10.0.0.10, 10.0.0.11"
-  }
-  assert {
-    condition     = local.bootstrap_config.override_dns && join(",", local.bootstrap_config.dns_servers) == "10.0.0.10,10.0.0.11"
-    error_message = "DNS override must deliver the selected servers in order, with whitespace removed."
-  }
-}
-run "reject_empty_dns_override" {
-  command = plan
-  variables {
-    override_dns   = true
-    ad_dns_servers = ""
-  }
-  expect_failures = [oci_core_instance.windows]
-}
-run "reject_invalid_dns_address" {
-  command = plan
-  variables {
-    override_dns   = true
-    ad_dns_servers = "10.0.0.10,999.0.0.1"
-  }
-  expect_failures = [var.ad_dns_servers]
 }
 
 run "blank_nsg_input" {

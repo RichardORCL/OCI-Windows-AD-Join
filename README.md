@@ -19,8 +19,19 @@ The [IAM stack](RMS/iam/README.md) creates a dedicated defined-tag namespace/key
 Create the Vault secret in the server deployment region using **Plain-Text** content with JSON for a delegated AD join account:
 
 ```json
-{"username":"join-service@corp.example.com","password":"REPLACE_WITH_REAL_PASSWORD"}
+{
+  "username": "svc-oci-join@corp.example.com",
+  "password": "REPLACE_WITH_REAL_PASSWORD",
+  "ad_join": {
+    "domain": "corp.example.com",
+    "ou_path": "OU=OCI Servers,DC=corp,DC=example,DC=com",
+    "override_dns": true,
+    "dns_servers": ["10.0.0.10", "10.0.0.11"]
+  }
+}
 ```
+
+The server stack requires the `ad_join` object shown above. Set `override_dns` to `false` and omit `dns_servers` to retain DHCP DNS. The OU is optional, but use a dedicated OU for scoped delegation. See the [secret format and account setup](RMS/README.md#credentials-select-a-secret-not-a-password-input).
 
 This step requires tenancy IAM/tag administration permissions. The group is restricted to the selected compartment and the bootstrap defined tag, defaulting to `ADJoinBootstrap.State=pending`.
 
@@ -37,8 +48,9 @@ The setup form includes:
 - Windows Server 2019, 2022 or 2025 and an x86 Standard Flex shape selector.
 - Instance/computer name, OCPUs, memory, boot volume, availability domain and existing VCN/subnet.
 - Optional NSGs as comma-separated OCIDs; blank attaches none.
-- AD domain, OU, Vault secret and bootstrap tag settings.
-- **Override DNS servers before AD join**: apply domain DNS IPv4 addresses and clear the DNS cache before domain discovery and joining. Unchecked retains subnet/DHCP DNS.
+- Vault secret and bootstrap tag settings. Domain, OU and DNS settings come from the selected secret.
+
+See [creating the delegated AD join account](RMS/README.md#create-a-dedicated-ad-join-account) for account creation, OU delegation and interactive sign-in restrictions.
 
 Defaults are a private instance, 2 OCPUs, 16 GiB RAM and a 100 GiB boot volume. Shape availability, capacity and Windows licensing charges depend on OCI. Your subnet must reach AD/DC DNS, regional OCI authentication/Compute/Secrets APIs and PyPI for SDK installation; see the detailed guide for routes, firewalls and prepared-image options.
 

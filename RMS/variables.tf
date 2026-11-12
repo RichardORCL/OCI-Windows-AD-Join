@@ -92,31 +92,6 @@ variable "private_ip" {
     error_message = "Private IP must be blank or a valid IPv4 address."
   }
 }
-variable "ad_domain_name" {
-  type = string
-  validation {
-    condition     = length(var.ad_domain_name) <= 253 && can(regex("^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", var.ad_domain_name))
-    error_message = "Enter the existing AD DNS domain, for example corp.example.com."
-  }
-}
-variable "override_dns" {
-  type        = bool
-  default     = false
-  description = "Set custom DNS on the primary Windows interface before joining AD; otherwise retain subnet/DHCP DNS."
-}
-variable "ad_dns_servers" {
-  type        = string
-  default     = ""
-  description = "Comma-separated DNS server IPv4 addresses, required when override_dns is enabled."
-  validation {
-    condition     = trimspace(var.ad_dns_servers) == "" || alltrue([for ip in split(",", var.ad_dns_servers) : can(cidrnetmask("${trimspace(ip)}/32"))])
-    error_message = "Enter one or more AD DNS IPv4 addresses, separated by commas."
-  }
-}
-variable "ad_ou_path" {
-  type    = string
-  default = ""
-}
 variable "secret_compartment_ocid" {
   type = string
 }

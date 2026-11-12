@@ -21,16 +21,13 @@ locals {
   ])
   image_id = var.image_ocid != "" ? var.image_ocid : try(data.oci_core_images.windows[0].images[0].id, null)
   bootstrap_config = {
-    computer_name = upper(var.computer_name)
-    domain        = lower(var.ad_domain_name)
-    override_dns  = var.override_dns
-    dns_servers   = var.override_dns ? [for ip in split(",", var.ad_dns_servers) : trimspace(ip) if trimspace(ip) != ""] : []
-    ou_path       = var.ad_ou_path
-    secret_id     = var.ad_credentials_secret_ocid
-    region        = var.region
-    tag_namespace = var.bootstrap_tag_namespace
-    tag_key       = var.bootstrap_tag_key
-    tag_value     = var.bootstrap_tag_value
+    computer_name     = upper(var.computer_name)
+    config_from_vault = true
+    secret_id         = var.ad_credentials_secret_ocid
+    region            = var.region
+    tag_namespace     = var.bootstrap_tag_namespace
+    tag_key           = var.bootstrap_tag_key
+    tag_value         = var.bootstrap_tag_value
   }
   user_data = templatefile("${path.module}/scripts/bootstrap.ps1.tftpl", {
     config_base64        = base64encode(jsonencode(local.bootstrap_config))
@@ -75,10 +72,6 @@ resource "oci_core_instance" "windows" {
     precondition {
       condition     = length(local.nsg_ids) <= 5 && alltrue([for id in local.nsg_ids : can(regex("^ocid1\\.networksecuritygroup\\.[A-Za-z0-9._-]+$", id))])
       error_message = "NSGs must be blank or contain up to five valid network security group OCIDs, separated by commas or supplied as a JSON array string."
-    }
-    precondition {
-      condition     = !var.override_dns || trimspace(var.ad_dns_servers) != ""
-      error_message = "Enter at least one DNS server IPv4 address when Override DNS servers before AD join is enabled."
     }
     precondition {
       condition     = local.image_id != null

@@ -1,7 +1,7 @@
 title: Windows Server — join existing Active Directory
 description: Launch a Windows VM in an existing network and join AD using credentials retrieved directly from OCI Vault by the instance.
 schemaVersion: 1.1.0
-version: "2.0.0"
+version: "3.0.0"
 locale: en
 variableGroups:
   - title: Placement
@@ -10,9 +10,7 @@ variableGroups:
     variables: [instance_name, computer_name, windows_server_version, shape, ocpus, memory_in_gbs, boot_volume_size_in_gbs, image_ocid]
   - title: Existing network
     variables: [network_compartment_ocid, vcn_ocid, subnet_ocid, nsg_ocids, private_ip, assign_public_ip]
-  - title: Active Directory
-    variables: [ad_domain_name, override_dns, ad_dns_servers, ad_ou_path]
-  - title: Join credentials in OCI Vault
+  - title: AD configuration and credentials in OCI Vault
     variables: [secret_compartment_ocid, ad_credentials_secret_ocid]
   - title: Temporary bootstrap tag (match the IAM stack)
     variables: [bootstrap_tag_namespace, bootstrap_tag_key, bootstrap_tag_value]
@@ -125,35 +123,14 @@ variables:
     title: Assign a public IPv4 address
     description: Requires a public subnet. Default is private access through your existing VPN or bastion.
     default: false
-  ad_domain_name:
-    type: string
-    title: Existing AD DNS domain
-    description: For example corp.example.com
-    required: true
-  override_dns:
-    type: boolean
-    title: Override DNS servers before AD join
-    description: Set DNS on the primary Windows network interface before domain discovery and joining. Leave unchecked to retain subnet/DHCP DNS, which must resolve the AD domain.
-    default: false
-  ad_dns_servers:
-    type: string
-    title: AD DNS server IPv4 addresses
-    description: Comma-separated, for example 10.0.0.10,10.0.0.11. These resolvers must also resolve public/OCI names.
-    required: true
-    visible: ${override_dns}
-  ad_ou_path:
-    type: string
-    title: Computer OU distinguished name (optional)
-    description: For example OU=Servers,DC=corp,DC=example,DC=com. Empty uses the domain default computer container.
-    required: false
   secret_compartment_ocid:
     type: oci:identity:compartment:id
     title: Secret compartment
     required: true
   ad_credentials_secret_ocid:
     type: oci:kms:secret:id
-    title: AD join credential secret
-    description: Select a secret in this region containing JSON with username and password. Only its OCID enters Terraform. See README for the exact format.
+    title: AD join configuration secret
+    description: Select a secret in this region containing username, password and an ad_join object with domain, OU and optional DNS settings. Only its OCID enters Terraform. See README for the exact format.
     required: true
     dependsOn:
       compartmentId: ${secret_compartment_ocid}

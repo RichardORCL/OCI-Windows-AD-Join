@@ -4,27 +4,79 @@ For an ordinary OCI instance launch with an attached script instead of a server 
 
 First deploy the separate reusable IAM stack described in `iam/README.md`, then upload `dist/oci-windows-ad-stack.zip` to **OCI Console → Developer Services → Resource Manager → Stacks → Create stack → My configuration → .zip file**. The archive has Terraform and `schema.yaml` at its root. Select the deployment region, complete the form, review a Plan, then Apply. No resources have been deployed by creating this project.
 
-The form provides Windows Server **2019 / 2022 / 2025**, an OCI shape dropdown filtered to x86 Standard Flex VMs, OCPUs, memory, boot volume, compartment, availability domain, existing VCN/subnet, optional NSGs and private IP, AD DNS/domain/OU, and a Vault secret picker. Defaults are 2 OCPUs, 16 GiB RAM, a 100 GiB boot disk and no public IP. Supported shapes, image availability, capacity and shape-specific sizing limits still depend on your region. Windows licensing is charged by OCI in addition to Compute.
+The form provides Windows Server **2019 / 2022 / 2025**, an OCI shape dropdown filtered to x86 Standard Flex VMs, OCPUs, memory, boot volume, compartment, availability domain, existing VCN/subnet, optional NSGs and private IP, and a Vault secret picker. Defaults are 2 OCPUs, 16 GiB RAM, a 100 GiB boot disk and no public IP. Supported shapes, image availability, capacity and shape-specific sizing limits still depend on your region. Windows licensing is charged by OCI in addition to Compute.
 
 ## Credentials: select a secret, not a password input
 
 Before launching the stack, create an OCI Vault, an AES encryption key, and a secret **in the deployment region**. In the Console's secret creation form choose **Plain-Text** secret content and paste a JSON object in this format:
 
 ```json
-{"username":"join-service@corp.example.com","password":"REPLACE_WITH_REAL_PASSWORD"}
+{
+  "username": "svc-oci-join@corp.example.com",
+  "password": "REPLACE_WITH_REAL_PASSWORD",
+  "ad_join": {
+    "domain": "corp.example.com",
+    "ou_path": "OU=OCI Servers,DC=corp,DC=example,DC=com",
+    "override_dns": true,
+    "dns_servers": ["10.0.0.10", "10.0.0.11"]
+  }
+}
 ```
 
-`CORP\\join-service` is also valid JSON syntax for a down-level username. Paste actual JSON, not a base64 encoding, when choosing Plain-Text. The Secrets API returns its content base64 encoded; the helper decodes it. Both fields must be nonempty JSON strings. Use the secret's CURRENT version. Grant this account only the rights needed to create/join computer accounts in the target OU; Domain Admin membership is unnecessary. Existing computer account reuse is subject to Microsoft's domain join hardening and account ownership rules.
+`CORP\\join-service` is also valid JSON syntax for a down-level username. Paste actual JSON, not a base64 encoding, when choosing Plain-Text. The Secrets API returns its content base64 encoded; the helper decodes it. `username` and `password` must be nonempty strings. The server stack also requires an `ad_join` object: `domain` is required; `ou_path` defaults to the domain default computer container; `override_dns` defaults to `false`; `dns_servers` is an array of IPv4 strings required when overriding DNS. Keep the per-server computer name in the stack form. The guest validates these settings, persists only the noncredential settings for reboot verification, and never writes the username/password to its configuration file. Unknown `ad_join` fields are rejected. Use the secret's CURRENT version. Grant this account only the rights needed to create/join computer accounts in the target OU; Domain Admin membership is unnecessary. Existing computer account reuse is subject to Microsoft's domain join hardening and account ownership rules.
 
 Select the **secret compartment** and **AD join credential secret** in the stack form. The form intentionally has no username/password inputs: masking a Terraform variable or marking it `sensitive` only redacts presentation and does not reliably keep its value out of state. This stack never creates a Terraform-managed secret or reads a secret bundle through a Terraform data source.
 
-Only the secret OCID enters Terraform variables, user data and state. The Windows instance retrieves username/password directly from Vault using instance-principal authentication. The helper passes JSON to its parent PowerShell process over a pipe; credentials are not passed as process arguments, written to a credential file, or included in Terraform outputs. Bootstrap status omits raw exception messages and does not enable request logging or PowerShell transcripts. Windows/AD may independently audit the account name; the password exists briefly in process memory. The temporary bootstrap tag grants instance-principal access only during enrollment. After verified join the worker removes it and waits for Vault denial; see the IAM and revocation section below for propagation and guest-administrator limitations.
+Domain, OU and DNS fields are no longer Terraform variables or form inputs. Only the secret OCID enters Terraform variables, user data and state. The Windows instance retrieves configuration and username/password directly from Vault using instance-principal authentication. The helper passes JSON to its parent PowerShell process over a pipe; credentials are not passed as process arguments, written to a credential file, or included in Terraform outputs. Bootstrap status omits raw exception messages and does not enable request logging or PowerShell transcripts. Windows/AD may independently audit the account name; the password exists briefly in process memory. The temporary bootstrap tag grants instance-principal access only during enrollment. After verified join the worker removes it and waits for Vault denial; see the IAM and revocation section below for propagation and guest-administrator limitations.
+
+## Create a dedicated AD join account
+
+This example targets **new computer accounts with unique names** in a dedicated `OCI Servers` OU. Run the account creation commands as an AD administrator on a management host with the ActiveDirectory module. Replace the example domain and existing service-account OU. Use a long generated password from your password manager; the secure prompt avoids putting it in shell history.
+
+```powershell
+Import-Module ActiveDirectory
+$domain = Get-ADDomain
+$serverOU = "OU=OCI Servers,$($domain.DistinguishedName)"
+$serviceOU = "OU=Service Accounts,$($domain.DistinguishedName)" # must already exist
+New-ADOrganizationalUnit -Name 'OCI Servers' -Path $domain.DistinguishedName `
+    -ProtectedFromAccidentalDeletion $true
+$password = Read-Host 'New join-account password' -AsSecureString
+New-ADUser -Name 'OCI Domain Join' -SamAccountName 'svc-oci-join' `
+    -UserPrincipalName "svc-oci-join@$($domain.DNSRoot)" -Path $serviceOU `
+    -AccountPassword $password -Enabled $true -ChangePasswordAtLogon $false `
+    -AccountNotDelegated $true
+Remove-Variable password
+```
+
+Leave the account out of administrative groups, Remote Desktop Users and application access groups. Keep your normal password expiration policy and rotate the Vault secret's CURRENT version before the account password expires. Do not require a password change at next sign-in for this unattended account.
+
+In **Active Directory Users and Computers**, enable **View → Advanced Features**. Open only the `OCI Servers` OU → **Properties → Security → Advanced → Add**. Select `svc-oci-join` as principal, choose **Allow**, set **Applies to: This object only**, and select only **Create Computer objects** (use **Show advanced permissions** if needed). Save and check the resulting ACE. Do not grant deletion, Full Control, unrelated object types or domain-root delegation. This grants creation for fresh names; it does not grant password-reset rights over existing servers. Put this exact OU DN in the secret's `ad_join.ou_path`. See [Microsoft's domain-join permissions guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/active-directory-domain-join-permissions).
+
+Do not grant Reset Password across an OU of existing production servers just to support new deployments. Reusing/prestaging existing computer accounts requires additional object permissions and trusted ownership under [Microsoft's account reuse hardening](https://support.microsoft.com/help/5020276). Treat that as a separately scoped workflow; the create-only example deliberately uses fresh names. Creation also gives the account ownership-related authority over objects it creates, so limit the OU to enrollment targets.
+
+A normal AD user retains inherited Domain Users/Authenticated Users access, including directory reads; “no other permissions” cannot be promised just by creating a service account. Also review `ms-DS-MachineAccountQuota`: a nonzero domain default can allow ordinary users to create computers outside this OU. If your AD design permits, an administrator can set it to zero **domain-wide**, after assessing other provisioning workflows:
+
+```powershell
+# Optional domain-wide policy change; evaluate impact before running.
+Set-ADObject -Identity (Get-ADDomain).DistinguishedName `
+    -Replace @{'ms-DS-MachineAccountQuota' = 0}
+```
+
+### Block interactive sign-in
+
+Create a security group such as `GG-OCI-Join-NoInteractive`, add only the join account, and configure a GPO under **Computer Configuration → Policies → Windows Settings → Security Settings → Local Policies → User Rights Assignment**. Add this group to **Deny log on locally** and **Deny log on through Remote Desktop Services**. Preserve existing entries. Apply the GPO to all computers where sign-in must be blocked, including domain controllers through an appropriately scoped DC policy; verify effective policy on each scope. These are computer policies, so linking only to the service account's OU has no effect. [Microsoft recommends denying RDP sign-in to service accounts](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/deny-log-on-through-remote-desktop-services).
+
+You can also deny **Log on as a batch job** and **Log on as a service** for this group if the account is used solely for joining. Do **not** deny network access to domain controllers: the join needs network authentication. The bootstrap itself runs as local SYSTEM; the AD credential is used only for the join operation. Confirm a test join succeeds and local/RDP sign-in is denied after policy applies.
+
+## Updating an existing stack
+
+Create a new CURRENT secret version containing `ad_join` before deploying this stack version. Remove old `ad_domain_name`, `ad_ou_path`, `override_dns` and `ad_dns_servers` values from saved stack/CLI variables. A credentials-only secret now fails guest validation. Updating user data does not rerun bootstrap on an existing VM; use a new instance for the new configuration. Secret changes are read at enrollment and do not continuously reconfigure joined machines.
 
 ## Prerequisites
 
 - An existing AD domain and a **unique computer name** (1–15 characters). Optional OU distinguished name, such as `OU=Servers,DC=corp,DC=example,DC=com`.
 - An existing IPv4 subnet with routing through your VCN, peering, VPN or FastConnect to the domain controllers. This stack does not create networks or firewall rules. Enter optional NSGs as comma-separated OCIDs (up to five); leave the field blank to attach none. Choose NSGs in the selected VCN and ensure the subnet belongs to it. RDP access must come through existing network rules/VPN/bastion; adding a public IP does not open RDP.
-- Reachable AD DNS resolvers. Enable **Override DNS servers before AD join** to set the supplied DNS addresses on the primary interface and clear the DNS cache before domain discovery and joining. The override persists after reboot. Leave it unchecked (the default) to retain subnet/DHCP DNS; those resolvers must already resolve the AD domain. When enabled, at least one valid IPv4 address is required; separate multiple addresses with commas. For CLI use set `override_dns = true` together with `ad_dns_servers`. They must resolve the AD SRV records **and** public OCI/PyPI names, using forwarding where necessary. Allow AD traffic through security lists/NSGs, Windows Firewall and intervening firewalls: DNS TCP/UDP 53, Kerberos TCP/UDP 88 and 464, LDAP TCP/UDP 389, SMB TCP 445, RPC TCP 135 and dynamic RPC TCP 49152–65535, and time synchronization UDP 123 where applicable. Additional ports depend on your AD configuration; see Microsoft's reference below. Keep clocks synchronized with the domain.
+- Reachable AD DNS resolvers. In the secret, set `ad_join.override_dns` to `true` and supply `ad_join.dns_servers` to set the primary interface DNS and clear its cache before AD discovery/join. This persists after reboot. Set it to `false` to retain DHCP DNS. Initial DNS must resolve PyPI and OCI APIs because SDK installation and Vault retrieval precede the override. The override resolvers must also resolve public OCI names for subsequent access cleanup. Allow AD traffic through security lists/NSGs, Windows Firewall and intervening firewalls: DNS TCP/UDP 53, Kerberos TCP/UDP 88 and 464, LDAP TCP/UDP 389, SMB TCP 445, RPC TCP 135 and dynamic RPC TCP 49152–65535, and time synchronization UDP 123 where applicable. Additional ports depend on your AD configuration; see Microsoft's reference below. Keep clocks synchronized with the domain.
 - HTTPS access to regional OCI authentication and Secrets endpoints and to `pypi.org` / `files.pythonhosted.org`. A private subnet normally needs NAT for PyPI (a service gateway alone does not reach it). IMDS at `169.254.169.254` must remain reachable without a proxy. Do not block OCI Windows activation traffic at `169.254.169.253`.
 - The platform image's Cloudbase-Init Python runtime with pip. The worker discovers the standard `Cloudbase-Init\Python\python.exe` location and installs `oci==2.191.0` with `--no-compile` to skip installation-time bytecode compilation into a separate `C:\ProgramData\OCI-ADJoin\sdk` directory. It does not modify Cloudbase-Init's site-packages. For restricted networks, prepare an **unjoined** custom image with this SDK and dependencies in that directory and a `.ready-2.191.0` marker; test the helper's imports under the bundled Python. A private package mirror can also be configured in the image's pip settings. Runtime and wheels must be compatible; this has not been boot-tested on every image family.
 - Permissions for the stack operator/Resource Manager execution identity to create/manage instances and boot volumes, use subnets/VNICs/NSGs, inspect images/regions, and list the form's compartments/network resources/secret metadata. The server deployment identity must also be allowed to use the bootstrap tag namespace. Secret-bundle read permission is needed by the guest, not by Terraform. Resource Manager authorization must also permit any delegated execution mode you use.
@@ -58,7 +110,7 @@ If an existing stack fails with `Missing expression` for `var.nsg_ocids`, edit t
 
 1. Terraform resolves the latest compatible Windows Standard Edition VM platform image for the selected year and shape, unless an image override is provided. Override selection is filtered by Windows and shape; **you must choose an image of the intended year** with the required bootstrap components. Automatic selection is checked at every plan, so a newer platform image can propose instance replacement; pin `image_ocid` after initial deployment if that is undesirable.
 2. Cloudbase-Init expands the gzip/base64-embedded scripts using built-in .NET support and writes nonsecret configuration and the worker scripts to an Administrators/SYSTEM-only directory and registers `OCI-ADJoin`, a scheduled task running as SYSTEM. It does not join/reboot synchronously inside user data.
-3. The task starts after 30 seconds and polls Cloudbase-Init readiness every 15 seconds for up to 45 seconds per invocation. Once ready, it applies the optional DNS override and checks AD SRV records, installs the isolated SDK, reads Vault, and calls `Add-Computer`, optionally renaming the machine and selecting an OU.
+3. The task starts after 30 seconds and polls Cloudbase-Init readiness every 15 seconds for up to 45 seconds per invocation. Once ready, it installs the isolated SDK, reads configuration and credentials from Vault, applies the optional DNS override, checks AD SRV records, and calls `Add-Computer`, optionally renaming the machine and selecting an OU.
 4. After successfully persisting its pending state, the worker schedules a reboot with a 10-second delay. On a subsequent boot it verifies domain membership, computer name and the secure channel before removing the bootstrap tag, waiting for Vault access denial, marking completion and removing its task. It does not rejoin a computer that already belongs to the requested domain.
 5. Prerequisite attempts recur every minute and on startup. If Cloudbase-Init is still running after the 45-second polling window, the worker returns and waits for the next one-minute trigger. Enrollment is limited to six hours or 360 attempts, with a separate two-hour post-join cleanup window. A process is limited to 15 minutes; overlapping runs are suppressed. An `Add-Computer` error stops the task immediately to avoid repeatedly submitting an invalid password; fix the cause before restarting. An exhausted retry window removes the task at the next attempt. IAM propagation or DNS/network errors can delay enrollment.
 
