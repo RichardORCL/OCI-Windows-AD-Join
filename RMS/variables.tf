@@ -131,3 +131,14 @@ variable "bootstrap_tag_value" {
     error_message = "Use 1–64 letters, digits or underscores, starting with a letter."
   }
 }
+
+variable "install_rds_session_host" {
+  type        = bool
+  default     = false
+  description = "Install standalone Remote Desktop Session Host without Connection Broker. Configure licensing and user access through GPO."
+}
+variable "install_remote_assistance" {
+  type        = bool
+  default     = false
+  description = "Install Windows Remote Assistance. Configure assistance policy through GPO."
+}

@@ -32,7 +32,7 @@ $firstRun = (Get-Date).AddSeconds(30)
 $timer = New-ScheduledTaskTrigger -Once -At $firstRun -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 1)
 $startup = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 60)
 Register-ScheduledTask -TaskName 'OCI-ADJoin' -Action $action -Trigger @($timer, $startup) -Principal $principal -Settings $settings -Force | Out-Null
 # Cloudbase-Init must finish before a separate process attempts the join/reboot.
 @{ state = 'scheduled'; updated_utc = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $root 'status.json') -Encoding UTF8

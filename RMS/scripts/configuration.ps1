@@ -24,7 +24,7 @@ function Get-InstanceMetadata {
 }
 
 function ConvertTo-NonsecretConfiguration($InputConfig, [bool]$RequireDomain = $true) {
-    $allowed = @('secret_id', 'region', 'computer_name', 'domain', 'override_dns', 'dns_servers', 'ou_path', 'tag_namespace', 'tag_key', 'tag_value', 'config_from_vault', 'manual_metadata')
+    $allowed = @('secret_id', 'region', 'computer_name', 'domain', 'override_dns', 'dns_servers', 'ou_path', 'tag_namespace', 'tag_key', 'tag_value', 'config_from_vault', 'manual_metadata', 'install_rds_session_host', 'install_remote_assistance')
     foreach ($property in $InputConfig.PSObject.Properties) {
         if ($allowed -notcontains $property.Name) { throw 'Unknown configuration field; keep credentials in Vault' }
     }
@@ -44,6 +44,13 @@ function ConvertTo-NonsecretConfiguration($InputConfig, [bool]$RequireDomain = $
         tag_value = 'pending'
         config_from_vault = $false
         manual_metadata = $false
+    }
+    foreach ($name in @('install_rds_session_host', 'install_remote_assistance')) {
+        $result[$name] = $false
+        if ($InputConfig.PSObject.Properties[$name]) {
+            if ($InputConfig.$name -isnot [bool]) { throw 'Feature settings must be JSON booleans' }
+            $result[$name] = $InputConfig.$name
+        }
     }
     if ($result.secret_id -notmatch '^ocid1\.vaultsecret\.[A-Za-z0-9._-]+$') { throw 'A Vault secret OCID is required' }
     if ($result.region -notmatch '^[a-z0-9-]+$') { throw 'A valid OCI region is required' }
@@ -125,6 +132,8 @@ function Resolve-VaultConfiguration($Existing, $Profile) {
         tag_key = $Existing.tag_key
         tag_value = $Existing.tag_value
         config_from_vault = $false
+        install_rds_session_host = ($Existing.install_rds_session_host -eq $true)
+        install_remote_assistance = ($Existing.install_remote_assistance -eq $true)
     }
     foreach ($property in $Profile.PSObject.Properties) { $settings[$property.Name] = $property.Value }
     return ConvertTo-NonsecretConfiguration ([pscustomobject]$settings) $true

@@ -68,6 +68,21 @@ Create a security group such as `GG-OCI-Join-NoInteractive`, add only the join a
 
 You can also deny **Log on as a batch job** and **Log on as a service** for this group if the account is used solely for joining. Do **not** deny network access to domain controllers: the join needs network authentication. The bootstrap itself runs as local SYSTEM; the AD credential is used only for the join operation. Confirm a test join succeeds and local/RDP sign-in is denied after policy applies.
 
+## Optional Windows features
+
+The stack form provides two independent checkboxes, both disabled by default:
+
+- **Install Remote Desktop Session Host** (`install_rds_session_host`): installs `RDS-RD-Server` with management tools, without Connection Broker, RD Web Access or an RD Licensing role.
+- **Install Windows Remote Assistance** (`install_remote_assistance`): installs `Remote-Assistance`.
+
+These per-server choices stay in the stack configuration, not the domain secret. After the AD join reboot, secure-channel verification, tag removal and confirmed Vault denial, the SYSTEM worker installs only missing selected features. It saves progress before servicing, performs a controlled reboot after installing features, and resumes on startup to verify installation. Preinstalled features need no additional reboot. Interrupted installation is recovered conservatively with a reboot before verification. Feature provisioning has its own six-hour deadline; each task invocation allows up to 60 minutes and overlapping runs are suppressed. IAM propagation can delay the start of feature installation. Completion means the domain and secret-access checks passed and all requested features were verified installed; it does not validate RDS licensing or GPO configuration.
+
+For a standalone Session Host, configure an existing RD Licensing server and Per User/Per Device licensing mode through domain GPO at **Computer Configuration → Administrative Templates → Windows Components → Remote Desktop Services → Remote Desktop Session Host → Licensing**. You need appropriate RDS CALs. Configure authorized user groups and network access through your existing policies. See [Microsoft's standalone host guidance](https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/install-rds-host-role-service-without-connection-broker) and [licensing configuration](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-license-session-hosts).
+
+Remote Assistance installation does not authorize helpers or enable unsolicited assistance. Configure that separately through GPO under **Computer Configuration → Administrative Templates → System → Remote Assistance**, including permitted helper groups and firewall policy.
+
+Feature stages appear in `timings.jsonl` and `worker.log`: `windows-feature-inspection`, `windows-feature-installation`, `feature-reboot-scheduling`, and `windows-feature-verification`. Status is `features_pending_reboot` while waiting for the feature reboot. `windows_feature_result` records servicing success, exit code and restart requirement; `windows_features_verified` records verified feature names. Detailed servicing output is at `C:\ProgramData\OCI-ADJoin\windows-features.log`; Windows also keeps `C:\Windows\Logs\CBS\CBS.log`. Feature errors remain incomplete and retry within the feature deadline.
+
 ## Updating an existing stack
 
 Create a new CURRENT secret version containing `ad_join` before deploying this stack version. Remove old `ad_domain_name`, `ad_ou_path`, `override_dns` and `ad_dns_servers` values from saved stack/CLI variables. A credentials-only secret now fails guest validation. Updating user data does not rerun bootstrap on an existing VM; use a new instance for the new configuration. Secret changes are read at enrollment and do not continuously reconfigure joined machines.
@@ -112,7 +127,7 @@ If an existing stack fails with `Missing expression` for `var.nsg_ocids`, edit t
 2. Cloudbase-Init expands the gzip/base64-embedded scripts using built-in .NET support and writes nonsecret configuration and the worker scripts to an Administrators/SYSTEM-only directory and registers `OCI-ADJoin`, a scheduled task running as SYSTEM. It does not join/reboot synchronously inside user data.
 3. The task starts after 30 seconds and polls Cloudbase-Init readiness every 15 seconds for up to 45 seconds per invocation. Once ready, it installs the isolated SDK, reads configuration and credentials from Vault, applies the optional DNS override, checks AD SRV records, and calls `Add-Computer`, optionally renaming the machine and selecting an OU.
 4. After successfully persisting its pending state, the worker schedules a reboot with a 10-second delay. On a subsequent boot it verifies domain membership, computer name and the secure channel before removing the bootstrap tag, waiting for Vault access denial, marking completion and removing its task. It does not rejoin a computer that already belongs to the requested domain.
-5. Prerequisite attempts recur every minute and on startup. If Cloudbase-Init is still running after the 45-second polling window, the worker returns and waits for the next one-minute trigger. Enrollment is limited to six hours or 360 attempts, with a separate two-hour post-join cleanup window. A process is limited to 15 minutes; overlapping runs are suppressed. An `Add-Computer` error stops the task immediately to avoid repeatedly submitting an invalid password; fix the cause before restarting. An exhausted retry window removes the task at the next attempt. IAM propagation or DNS/network errors can delay enrollment.
+5. Prerequisite attempts recur every minute and on startup. If Cloudbase-Init is still running after the 45-second polling window, the worker returns and waits for the next one-minute trigger. Enrollment is limited to six hours or 360 attempts, with a separate two-hour post-join cleanup window. A process is limited to 60 minutes; overlapping runs are suppressed. An `Add-Computer` error stops the task immediately to avoid repeatedly submitting an invalid password; fix the cause before restarting. An exhausted retry window removes the task at the next attempt. IAM propagation or DNS/network errors can delay enrollment.
 
 **A successful Terraform Apply means Compute provisioning succeeded, not that the AD join succeeded.** Terraform intentionally does not receive credentials or poll the guest. Inspect this on Windows through your approved access method:
 
@@ -157,7 +172,7 @@ $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowe
 $timer = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(30) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 1)
 $startup = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 60)
 Register-ScheduledTask -TaskName OCI-ADJoin -Action $action -Trigger @($timer, $startup) -Principal $principal -Settings $settings -Force
 ```
 

@@ -21,13 +21,15 @@ locals {
   ])
   image_id = var.image_ocid != "" ? var.image_ocid : try(data.oci_core_images.windows[0].images[0].id, null)
   bootstrap_config = {
-    computer_name     = upper(var.computer_name)
-    config_from_vault = true
-    secret_id         = var.ad_credentials_secret_ocid
-    region            = var.region
-    tag_namespace     = var.bootstrap_tag_namespace
-    tag_key           = var.bootstrap_tag_key
-    tag_value         = var.bootstrap_tag_value
+    computer_name             = upper(var.computer_name)
+    config_from_vault         = true
+    install_rds_session_host  = var.install_rds_session_host
+    install_remote_assistance = var.install_remote_assistance
+    secret_id                 = var.ad_credentials_secret_ocid
+    region                    = var.region
+    tag_namespace             = var.bootstrap_tag_namespace
+    tag_key                   = var.bootstrap_tag_key
+    tag_value                 = var.bootstrap_tag_value
   }
   user_data = templatefile("${path.module}/scripts/bootstrap.ps1.tftpl", {
     config_base64        = base64encode(jsonencode(local.bootstrap_config))

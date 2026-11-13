@@ -11,3 +11,7 @@ ad_credentials_secret_ocid = "ocid1.vaultsecret.oc1.eu-amsterdam-1.REPLACE"
 bootstrap_tag_namespace = "ADJoinBootstrap"
 bootstrap_tag_key       = "State"
 bootstrap_tag_value     = "pending"
+
+# Optional Windows roles/features (installed after domain join and Vault revocation).
+install_rds_session_host = false
+install_remote_assistance = false

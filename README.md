@@ -48,6 +48,7 @@ The setup form includes:
 - Windows Server 2019, 2022 or 2025 and an x86 Standard Flex shape selector.
 - Instance/computer name, OCPUs, memory, boot volume, availability domain and existing VCN/subnet.
 - Optional NSGs as comma-separated OCIDs; blank attaches none.
+- Optional Remote Desktop Session Host (without Connection Broker) and Windows Remote Assistance. Installation, reboot recovery and verification are automatic after domain join and confirmed Vault revocation. Configure RDS licensing and assistance policy through GPO; see the [feature guide](RMS/README.md#optional-windows-features).
 - Vault secret and bootstrap tag settings. Domain, OU and DNS settings come from the selected secret.
 
 See [creating the delegated AD join account](RMS/README.md#create-a-dedicated-ad-join-account) for account creation, OU delegation and interactive sign-in restrictions.

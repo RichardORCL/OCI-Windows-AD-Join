@@ -17,7 +17,7 @@ function Save-Progress {
 function Wait-CloudbaseInit([int]$PollSeconds = 15, [int]$MaxWaitSeconds = 45) {
     # Poll inside this invocation; the one-minute task trigger handles later retries.
     # Keep this wait shorter than the trigger interval so a prolonged Cloudbase run
-    # does not consume the whole 15-minute task budget before SDK installation.
+    # does not consume the whole task budget before SDK installation.
     $waitWatch = [Diagnostics.Stopwatch]::StartNew()
     Write-TimingEvent 'cloudbase_poll_configuration' @{ stage = 'cloudbase-init'; poll_interval_seconds = $PollSeconds; max_wait_seconds = $MaxWaitSeconds }
     do {
@@ -59,6 +59,55 @@ function Initialize-OciSdk {
     return $python
 }
 
+# Runs only after confirmed Vault revocation. No AD credentials are needed.
+function Complete-WindowsFeatures($Settings, [string]$BootId) {
+    $names = @()
+    if ($Settings.install_rds_session_host -eq $true) { $names += 'RDS-RD-Server' }
+    if ($Settings.install_remote_assistance -eq $true) { $names += 'Remote-Assistance' }
+    if ($names.Count -eq 0) { return $true }
+    if (-not $progress.feature_deadline) {
+        $progress.feature_deadline = [DateTime]::UtcNow.AddHours(6).ToString('o')
+        Save-Progress
+    }
+    if ([DateTime]::UtcNow -gt ([DateTime]$progress.feature_deadline).ToUniversalTime()) {
+        throw 'Feature installation deadline expired'
+    }
+    if ($progress.feature_pending_boot -eq $BootId) {
+        Set-Stage 'feature-reboot-scheduling'
+        Write-Status 'features_pending_reboot' 'windows-features'
+        & shutdown.exe /r /t 10 /d p:2:4 /c 'Complete OCI Windows feature installation'
+        if ($LASTEXITCODE -ne 0) { throw 'Feature reboot scheduling failed' }
+        return $false
+    }
+    Set-Stage 'windows-feature-inspection'
+    Import-Module ServerManager -ErrorAction Stop
+    $features = @(Get-WindowsFeature -Name $names -ErrorAction Stop)
+    if ($features.Count -ne $names.Count) { throw 'Requested Windows feature unavailable' }
+    $missing = @($features | Where-Object { -not $_.Installed } | ForEach-Object { $_.Name })
+    if ($missing.Count -gt 0) {
+        Set-Stage 'windows-feature-installation'
+        # Persist before servicing: if interrupted after success but before saving
+        # the result, the next invocation conservatively reboots before verifying.
+        $progress.feature_install_started = $true
+        Save-Progress
+        $result = Install-WindowsFeature -Name $missing -IncludeManagementTools -Restart:$false -LogPath (Join-Path $root 'windows-features.log') -ErrorAction Stop
+        Write-TimingEvent 'windows_feature_result' @{ success = [bool]$result.Success; restart_needed = [string]$result.RestartNeeded; exit_code = [string]$result.ExitCode }
+        if (-not $result.Success) { throw 'Windows feature installation failed' }
+        # A single controlled reboot also covers servicing completion where the
+        # feature reports installed before its configuration is fully committed.
+    }
+    if ($progress.feature_install_started) {
+        $progress.feature_install_started = $false
+        $progress.feature_pending_boot = $BootId
+        Save-Progress
+        return Complete-WindowsFeatures $Settings $BootId
+    }
+    Set-Stage 'windows-feature-verification'
+    if ($missing.Count -gt 0) { throw 'Windows features not installed' }
+    Write-TimingEvent 'windows_features_verified' @{ features = $names }
+    return $true
+}
+
 $stage = 'initialization'
 try {
     Set-Stage 'initialization'
@@ -75,12 +124,16 @@ try {
         }
         Save-Progress
     }
-    if (-not $progress.cleanup_deadline -and ([DateTime]::UtcNow -gt [DateTime]::Parse($progress.deadline).ToUniversalTime() -or $progress.attempts -ge 360)) {
+    # Defaults also support progress files created by older workers.
+    foreach ($entry in @{ access_revoked = $false; feature_deadline = ''; feature_pending_boot = ''; feature_install_started = $false }.GetEnumerator()) {
+        if (-not $progress.PSObject.Properties[$entry.Key]) { $progress | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value }
+    }
+    if (-not $progress.access_revoked -and -not $progress.cleanup_deadline -and ([DateTime]::UtcNow -gt ([DateTime]$progress.deadline).ToUniversalTime() -or $progress.attempts -ge 360)) {
         Write-Status 'failed' 'retry-window-expired'
         Stop-JoinTask
         exit 1
     }
-    if ($progress.cleanup_deadline -and [DateTime]::UtcNow -gt [DateTime]::Parse($progress.cleanup_deadline).ToUniversalTime()) {
+    if (-not $progress.access_revoked -and $progress.cleanup_deadline -and [DateTime]::UtcNow -gt ([DateTime]$progress.cleanup_deadline).ToUniversalTime()) {
         Write-Status 'failed' 'access-cleanup-window-expired'
         Stop-JoinTask
         exit 1
@@ -116,27 +169,32 @@ try {
         }
         Set-Stage 'secure-channel-verification'
         if (-not (Test-ComputerSecureChannel -ErrorAction Stop)) { throw 'Secure channel unavailable' }
-        if (-not $progress.cleanup_deadline) {
-            $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
+        if (-not $progress.access_revoked) {
+            if (-not $progress.cleanup_deadline) {
+                $progress.cleanup_deadline = [DateTime]::UtcNow.AddHours(2).ToString('o')
+                Save-Progress
+            }
+            Set-Stage 'sdk-install'
+            $python = Initialize-OciSdk
+            if (-not $progress.tag_removed) {
+                Set-Stage 'bootstrap-tag-removal'
+                & $python (Join-Path $root 'cleanup_access.py') 'remove-tag' *> $null
+                if ($LASTEXITCODE -ne 0) { throw 'Bootstrap tag removal failed' }
+                $progress.tag_removed = $true
+                Save-Progress
+            }
+            Set-Stage 'vault-revocation'
+            & $python (Join-Path $root 'cleanup_access.py') 'verify-revocation' *> $null
+            $probeResult = $LASTEXITCODE
+            if ($probeResult -eq 10) {
+                Write-Status 'revocation_pending' 'vault-access-still-active'
+                exit 0
+            }
+            if ($probeResult -ne 0) { throw 'Vault access denial could not be verified' }
+            $progress.access_revoked = $true
             Save-Progress
         }
-        Set-Stage 'sdk-install'
-        $python = Initialize-OciSdk
-        if (-not $progress.tag_removed) {
-            Set-Stage 'bootstrap-tag-removal'
-            & $python (Join-Path $root 'cleanup_access.py') 'remove-tag' *> $null
-            if ($LASTEXITCODE -ne 0) { throw 'Bootstrap tag removal failed' }
-            $progress.tag_removed = $true
-            Save-Progress
-        }
-        Set-Stage 'vault-revocation'
-        & $python (Join-Path $root 'cleanup_access.py') 'verify-revocation' *> $null
-        $probeResult = $LASTEXITCODE
-        if ($probeResult -eq 10) {
-            Write-Status 'revocation_pending' 'vault-access-still-active'
-            exit 0
-        }
-        if ($probeResult -ne 0) { throw 'Vault access denial could not be verified' }
+        if (-not (Complete-WindowsFeatures $config $boot)) { exit 0 }
         Set-Stage 'task-cleanup'
         Write-Status 'complete' 'domain-verified-tag-removed-vault-denied'
         Stop-JoinTask
@@ -189,7 +247,7 @@ try {
 } catch {
     Write-FailureCode $_
     # Intentionally omit exception messages, invocation details and transcripts.
-    if ($stage -eq 'domain-join') {
+    if ($stage -eq 'domain-join' -or ($progress.feature_deadline -and [DateTime]::UtcNow -gt ([DateTime]$progress.feature_deadline).ToUniversalTime())) {
         # Do not repeatedly submit a potentially invalid password and lock the account.
         Write-Status 'failed' $stage
         Stop-JoinTask

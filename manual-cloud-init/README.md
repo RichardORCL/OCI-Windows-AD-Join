@@ -119,3 +119,5 @@ pwsh -NoProfile -File manual-cloud-init/tests/test_configuration.ps1
 Run these commands from the repository root. Commit the generated `.ps1` together with source changes. Build validation checks that the complete encoded script plus example metadata fits OCI's metadata limit. Actual Windows launch, Vault/IAM enforcement and domain join require testing in your tenancy.
 
 References: [OCI Windows Cloudbase-Init](https://docs.oracle.com/en-us/iaas/Content/Compute/References/images.htm), [IMDSv2](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/gettingmetadata.htm), [metadata updates and reserved keys](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/updatinginstancemetada.htm).
+
+The shared runtime also supports optional `install_rds_session_host` and `install_remote_assistance` boolean settings (default `false`) in nonsecret inline/metadata configuration. See the [feature provisioning guide](../RMS/README.md#optional-windows-features) for reboot handling, logs and required licensing/GPO configuration.

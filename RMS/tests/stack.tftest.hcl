@@ -128,3 +128,22 @@ run "custom_bootstrap_tag" {
     error_message = "The launch tag and guest cleanup configuration must agree."
   }
 }
+
+run "optional_windows_features" {
+  command = plan
+  variables {
+    install_rds_session_host  = true
+    install_remote_assistance = true
+  }
+  assert {
+    condition     = local.bootstrap_config.install_rds_session_host && local.bootstrap_config.install_remote_assistance
+    error_message = "Feature choices must reach the guest configuration."
+  }
+}
+run "windows_features_disabled_by_default" {
+  command = plan
+  assert {
+    condition     = !local.bootstrap_config.install_rds_session_host && !local.bootstrap_config.install_remote_assistance
+    error_message = "Optional features must be disabled by default."
+  }
+}

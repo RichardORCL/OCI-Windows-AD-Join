@@ -8,6 +8,8 @@ variableGroups:
     variables: [compartment_ocid, region, availability_domain]
   - title: Server
     variables: [instance_name, computer_name, windows_server_version, shape, ocpus, memory_in_gbs, boot_volume_size_in_gbs, image_ocid]
+  - title: Optional Windows features
+    variables: [install_rds_session_host, install_remote_assistance]
   - title: Existing network
     variables: [network_compartment_ocid, vcn_ocid, subnet_ocid, nsg_ocids, private_ip, assign_public_ip]
   - title: AD configuration and credentials in OCI Vault
@@ -155,3 +157,13 @@ variables:
     default: pending
     required: true
     pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+  install_rds_session_host:
+    type: boolean
+    title: Install Remote Desktop Session Host
+    description: Standalone session host without Connection Broker. Requires RDS CALs and a licensing server configured through GPO. May require an automatic reboot.
+    default: false
+  install_remote_assistance:
+    type: boolean
+    title: Install Windows Remote Assistance
+    description: Installs the feature; configure assistance permissions and policy through GPO. May require an automatic reboot.
+    default: false

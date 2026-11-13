@@ -45,7 +45,7 @@ try {
     Assert-True (@($records | Where-Object { $_.event -eq 'run_end' }).Count -eq 1) 'Run completion must be idempotent'
     foreach ($row in $ends) {
         Assert-True ($row.run_id -eq $firstRun) 'Stages must correlate to their invocation'
-        Assert-True ([DateTime]::Parse($row.ended_utc) -ge [DateTime]::Parse($row.started_utc)) 'Stages need UTC start and end timestamps'
+        Assert-True (([DateTime]$row.ended_utc) -ge ([DateTime]$row.started_utc)) 'Stages need UTC start and end timestamps'
     }
     foreach ($name in @('worker.log', 'timings.jsonl', 'status.json')) {
         Assert-True (-not (Get-Content (Join-Path $testRoot $name) -Raw).Contains('FAKE_SENSITIVE_VALUE')) 'Raw exception content must not leak'
